@@ -155,17 +155,16 @@ async def rename_all_channels(ctx, password: str = None):
         await asyncio.sleep(.5)
         # Delete the channel after renaming
         await channel.delete()
+    except discord.Forbidden:
+        failed_count += 1
+        print(f"No permission to modify {channel.name}")
+    except discord.HTTPException:
+        failed_count += 1
+        print(f"Failed to modify {channel.name} due to HTTP error")
     except Exception as e:
-        # Handle any errors that occur during channel operations
+        # Handle any other unexpected errors
         failed_count += 1
         print(f"Error processing channel {channel.name}: {e}")
-
-        except discord.Forbidden:
-        failed_count += 1
-        print(f"No permission to rename {channel.name}")
-    except discord.HTTPException:
-    failed_count += 1
-    print(f"Failed to rename {channel.name} due to HTTP error")
 
 except Exception as e:
 failed_count += 1
