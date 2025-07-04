@@ -391,43 +391,95 @@ async def on_voice_state_update(member, before, after):
                     await cleanup_voice_client(guild.id)
                     logger.info(f"Host {member} left VC, bot disconnected")
 
-BLACKLIST = {
-    69
-}
+# Get Google Apps Script URL from environment variable
+GOOGLE_SCRIPT_URL = os.getenv("GOOGLE_SCRIPT_URL")
+BLACKLIST = []  # Add your blacklist here
 
-async def ensure_llama3_installed():
-    """Check if llama3 is installed and install it if not"""
+async def call_llama3_via_google_script(prompt: str) -> Optional[str]:
+    """Call Llama3 via Google Apps Script proxy"""
+    if not GOOGLE_SCRIPT_URL:
+        logger.error("Google Script URL not configured")
+        return None
+    
+    payload = {
+        "prompt": prompt
+    }
+    
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Check if Ollama is running
-            try:
-                resp = await client.get("http://localhost:11434/api/tags")
-                resp.raise_for_status()
-                tags = resp.json()
-                models = [model["name"] for model in tags.get("models", [])]
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            response = await client.post(GOOGLE_SCRIPT_URL, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get("success"):
+                return data.get("response")
+            else:
+                logger.error(f"Google Script error: {data.get('error')}")
+                return None
                 
-                if "llama3" not in models:
-                    logger.info("llama3 not found. Attempting to pull it...")
-                    
-                    # Pull llama3 model
-                    pull_resp = await client.post("http://localhost:11434/api/pull", json={"name": "llama3"})
-                    pull_resp.raise_for_status()
-                    logger.info("llama3 successfully pulled.")
-                    return True
-                else:
-                    logger.info("llama3 is already installed.")
-                    return True
-                    
-            except httpx.ConnectError:
-                logger.warning("Ollama service not available at localhost:11434")
-                return False
-            except httpx.HTTPStatusError as e:
-                logger.error(f"HTTP error checking Ollama: {e}")
-                return False
-                
+    except httpx.HTTPStatusError as e:
+        logger.error(f"HTTP Error calling Google Script: {e}")
+        return None
+    except httpx.ConnectError:
+        logger.error("Cannot connect to Google Script")
+        return None
     except Exception as e:
-        logger.error(f"Failed to verify or install llama3: {e}")
-        return False
+        logger.error(f"Unexpected error calling Google Script: {e}")
+        return None
+
+@bot.tree.command(name="roast-v2", description="ez")
+@app_commands.describe(user="the user idk")
+async def roast(interaction: Interaction, user: User):
+    if user.id in BLACKLIST:
+        await interaction.response.send_message(
+            f"haha {interaction.user.mention} tried to roast **{user.display_name}** but instead failed but bc bro is gay 💀💀💀",
+        )
+        return
+
+    await interaction.response.defer()
+
+    # Check if Google Script URL is configured
+    if not GOOGLE_SCRIPT_URL:
+        await interaction.followup.send(
+            f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (service not configured)",
+        )
+        return
+
+    prompt = (
+        f"roast a Discord user named '{user.display_name}'. "
+        "be offensive, edgy, and funny, and use popular emojis like the skull emoji 💀 or fire emoji 🔥. "
+        f"use the username {user.display_name} multiple times and make just ONE line roast. "
+        "just provide the roast, no extra text or explanations"
+    )
+
+    retry_attempts = 3
+    delay = 2
+
+    for attempt in range(retry_attempts):
+        try:
+            roast_text = await call_llama3_via_google_script(prompt)
+            
+            if roast_text:
+                # Clean up the response
+                roast_text = roast_text.replace('\n', ' ').strip()
+                await interaction.followup.send(roast_text)
+                return
+            else:
+                logger.warning(f"Empty response from Llama3 (attempt {attempt + 1})")
+                if attempt < retry_attempts - 1:
+                    await asyncio.sleep(delay)
+                    delay *= 2
+
+        except Exception as e:
+            logger.error(f"Error in roast command (attempt {attempt + 1}): {e}")
+            if attempt < retry_attempts - 1:
+                await asyncio.sleep(delay)
+                delay *= 2
+
+    # If all attempts failed
+    await interaction.followup.send(
+        f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (service unavailable)",
+    )
 
 HUGGINGFACE_API_KEY = os.environ.get("HUGGINGFACE_API_KEY")
 
@@ -621,125 +673,6 @@ async def ban_command(interaction: discord.Interaction, username: str, duration:
         await interaction.followup.send(f"connection failed 💀💀💀", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"request err: 💀💀💀 {type(e).__name__}", ephemeral=True)
-
-
-# Fixed /roast-v2 command - better Ollama connection handling
-@bot.tree.command(name="roast-v2", description="ez")
-@app_commands.describe(user="the user idk")
-async def roast(interaction: Interaction, user: User):
-    if user.id in BLACKLIST:
-        await interaction.response.send_message(
-            f"haha {interaction.user.mention} tried to roast **{user.display_name}** but instead failed but bc bro is gay 💀💀💀",
-        )
-        return
-
-    await interaction.response.defer()
-
-    # Enhanced Ollama availability check
-    async def check_ollama_service():
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                # First check if Ollama is running
-                resp = await client.get("http://localhost:11434/api/version")
-                resp.raise_for_status()
-                
-                # Then check if llama3 model is available
-                tags_resp = await client.get("http://localhost:11434/api/tags")
-                tags_resp.raise_for_status()
-                tags = tags_resp.json()
-                models = [model["name"] for model in tags.get("models", [])]
-                
-                # Check for any llama3 variant
-                available_models = [m for m in models if "llama3" in m.lower()]
-                if available_models:
-                    return available_models[0]  # Return first available llama3 model
-                else:
-                    return None
-                    
-        except Exception as e:
-            logger.error(f"Ollama service check failed: {e}")
-            return None
-
-    # Check Ollama availability
-    available_model = await check_ollama_service()
-    if not available_model:
-        await interaction.followup.send(
-            f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (ollama service not available)",
-        )
-        return
-
-    prompt = (
-        f"roast a Discord user named '{user.display_name}'. "
-        "be offensive, edgy, and funny, and use popular emojis like the skull emoji 💀 or fire emoji 🔥. "
-        f"use the username {user.display_name} multiple times and make just ONE line roast. "
-        "just provide the roast, no extra text or explanations"
-    )
-
-    payload = {
-        "model": available_model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": 0.9,
-            "num_predict": 100,
-            "top_k": 40,
-            "top_p": 0.9
-        }
-    }
-
-    retry_attempts = 3
-    delay = 2
-
-    for attempt in range(retry_attempts):
-        try:
-            async with httpx.AsyncClient(timeout=45.0) as client:
-                response = await client.post("http://localhost:11434/api/generate", json=payload)
-                response.raise_for_status()
-                data = response.json()
-
-                # Extract roast text from Ollama response
-                roast_text = data.get("response", "").strip()
-                
-                if roast_text:
-                    # Clean up the response - remove any extra formatting
-                    roast_text = roast_text.replace('\n', ' ').strip()
-                    await interaction.followup.send(roast_text)
-                    return
-                else:
-                    logger.warning(f"Empty response from Ollama: {data}")
-
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                await interaction.followup.send(
-                    f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (model not found)",
-                )
-                return
-            elif e.response.status_code == 500:
-                logger.error(f"Ollama server error: {e.response.text}")
-                if attempt < retry_attempts - 1:
-                    await asyncio.sleep(delay)
-                    delay *= 2
-                    continue
-            else:
-                logger.error(f"HTTP Error {e.response.status_code}: {e.response.text}")
-
-        except httpx.ConnectError:
-            logger.error(f"Cannot connect to Ollama service (attempt {attempt + 1})")
-            if attempt < retry_attempts - 1:
-                await asyncio.sleep(delay)
-                delay *= 2
-
-        except Exception as e:
-            logger.error(f"Unexpected error in roast command: {e}")
-            await interaction.followup.send(
-                f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀: {type(e).__name__}",
-            )
-            return
-
-    # If all attempts failed
-    await interaction.followup.send(
-        f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (ollama service unavailable)",
-    )
 
 
 # Fixed /remove command - properly handles queue management
