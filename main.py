@@ -876,15 +876,6 @@ async def remove_command(interaction: discord.Interaction):
     view = TrackRemovalView(interaction.user.id, queue, user_tracks)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-@bot.tree.command(name="export-ids", description="noobi asked me for this")
-async def export_ids(interaction: discord.Interaction):
-    await interaction.response.defer()
-    members = interaction.guild.members
-    ids = "\n".join(str(member.id) for member in members)
-
-    file = discord.File(fp=io.BytesIO(ids.encode()), filename="member_ids.txt")
-    await interaction.followup.send("ok here (noobi)", file=file)
-
 
 # Fixed /skip command - enhanced permission checking and error handling
 @bot.tree.command(name="skip", description="skips to the next track (requires manage messages permission or being the host)")
