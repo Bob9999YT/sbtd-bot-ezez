@@ -45,10 +45,6 @@ from io import BytesIO
 load_dotenv()
 token = os.environ.get("DISCORD_TOKEN")
 
-intents = discord.Intents.default()
-intents.members = True
-intents.guilds = True
-
 # Enhanced logging configuration
 logging.basicConfig(
     level=logging.INFO,
@@ -89,6 +85,9 @@ ALLOWED_USER_IDS = {
     864958103103078470, # "lol"
     1370566192280109098 # 2nd owner ig (this is bros fake gf i bet)
 }
+
+intents = discord.Intents.default()
+intents.members = True  # Add this line
 
 # Enhanced bot configuration
 bot = commands.Bot(
@@ -789,7 +788,7 @@ async def play_command(interaction: discord.Interaction, url: str):
 
 @bot.tree.command(name="export-ids", description="noobi asked me for this")
 async def export_ids(interaction: discord.Interaction):
-    """llll"""
+    """l"""
     try:
         # Defer the response since fetching members can take time
         await interaction.response.defer(ephemeral=True)
@@ -807,8 +806,8 @@ async def export_ids(interaction: discord.Interaction):
         
         # Write member IDs to file
         with open(filename, 'w', encoding='utf-8') as f:
-            f.write(f"member IDs for {interaction.guild.name}\n")
-            f.write(f"memebers: {len(members)}\n")
+            f.write(f"ids for {interaction.guild.name}\n")
+            f.write(f"members: {len(members)}\n")
             f.write("=" * 50 + "\n\n")
             
             for member in members:
@@ -825,7 +824,7 @@ async def export_ids(interaction: discord.Interaction):
         
     except Exception as e:
         await interaction.response.send_message(
-            f"err💀💀💀💀 {str(e)}",
+            f"lll err 💀💀💀: {str(e)}",
             ephemeral=True
         )
 
