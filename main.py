@@ -616,14 +616,18 @@ async def generate_image(interaction: discord.Interaction, prompt: str):
         ephemeral=True
     )
 
-@bot.tree.command(name="sbtd-ban", description="bans someone from sbtd but u gotta be a mod to do this so skill issue (real)")
+@bot.tree.command(name="sbtd-ban", description="bans someone from sbtd")
 @app_commands.describe(
     username="the roblox user to ban",
     duration="ban duration (1m, 1h, 1d, 1w, 1y)",
     reason="self explaintory"
 )
 async def ban_command(interaction: discord.Interaction, username: str, duration: str, reason: str):
-    await interaction.response.defer()
+    await interaction.response.defer(ephemeral=True)
+
+    if interaction.user.id not in ALLOWED_USER_IDS:
+        await interaction.followup.send("bros not a mod 💀💀", ephemeral=True)
+        return
 
     duration = duration.lower()
     if not any(duration.endswith(suffix) for suffix in ["m", "h", "d", "w", "y"]):
@@ -637,22 +641,23 @@ async def ban_command(interaction: discord.Interaction, username: str, duration:
         "token": os.environ.get("BAN_TOKEN")
     }
 
+    headers = {
+        "Content-Type": "application/json"
+    }
+
     try:
-        # Use async http client with timeout
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(WEBHOOK_URL, json=payload)
-            
-            if response.status_code == 200:
-                await interaction.followup.send(f"the dumbah {username} has been banned from sbtd 💀")
-            else:
-                await interaction.followup.send(f"skill issue: {response.status_code}", ephemeral=True)
-                
-    except httpx.TimeoutException:
-        await interaction.followup.send(f"request timed out 💀💀💀", ephemeral=True)
-    except httpx.ConnectError:
-        await interaction.followup.send(f"connection failed 💀💀💀", ephemeral=True)
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+            response = await client.post(WEBHOOK_URL, json=payload, headers=headers)
+
+        print("RESPONSE TEXT:", response.text)  # Debug
+
+        if response.status_code == 200:
+            await interaction.followup.send(f"the dumbah {username} has been banned from sbtd 💀")
+        else:
+            await interaction.followup.send(f"skill issue: {response.status_code}", ephemeral=True)
+
     except Exception as e:
-        await interaction.followup.send(f"request err: 💀💀💀 {type(e).__name__}", ephemeral=True)
+        await interaction.followup.send(f"💀💀💀 error: {type(e).__name__}", ephemeral=True)
 
 # Enhanced play command with better error handling
 @bot.tree.command(name="play", description="plays music from youtube or adds to queue")
