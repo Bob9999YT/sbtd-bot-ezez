@@ -847,6 +847,18 @@ async def remove_command(interaction: discord.Interaction):
     view = TrackRemovalView(interaction.user.id, queue, user_tracks)
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+@bot.tree.command(name="export-ids", description="noobi asked me for this")
+async def export_ids(interaction: discord.Interaction):
+  intents.members = True
+    intents.guilds = True
+    
+    await interaction.response.defer()
+    members = interaction.guild.members
+    ids = "\n".join(str(member.id) for member in members)
+
+    file = discord.File(fp=io.BytesIO(ids.encode()), filename="member_ids.txt")
+    await interaction.followup.send("ok here (noobi)", file=file)
+
 
 # Fixed /skip command - enhanced permission checking and error handling
 @bot.tree.command(name="skip", description="skips to the next track (requires manage messages permission or being the host)")
@@ -957,10 +969,10 @@ async def leave_command(interaction: discord.Interaction):
     # Enhanced cleanup
     try:
         await cleanup_voice_client(interaction.guild.id)
-        await interaction.response.send_message("👋 left the voice channel")
+        await interaction.response.send_message("ight this is a l vc only noobi is here im leaving")
     except Exception as e:
         logger.error(f"Error during leave command: {e}")
-        await interaction.response.send_message("left the voice channel (with some errors 💀)", ephemeral=True)
+        await interaction.response.send_message("ll it didnt work 💀💀💀💀", ephemeral=True)
 
 
 # Fixed /stop command - enhanced permission checking and queue management
