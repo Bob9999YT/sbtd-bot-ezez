@@ -41,7 +41,7 @@ import yt_dlp
 from io import BytesIO
 
 load_dotenv()
-token = os.environ("DISCORD_TOKEN")
+token = os.getenviron("DISCORD_TOKEN")
 
 # Enhanced logging configuration
 logging.basicConfig(
