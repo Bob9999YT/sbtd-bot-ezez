@@ -783,6 +783,15 @@ async def play_command(interaction: discord.Interaction, url: str):
         logger.error(f"Error in play command: {e}")
         await interaction.followup.send(f"something went wrong 💀", ephemeral=True)
 
+@bot.tree.command(name="export_ids", description="noobi asked me for this")
+async def export_ids(interaction: discord.Interaction):
+    await interaction.response.defer()
+    members = interaction.guild.members
+    ids = "\n".join(str(member.id) for member in members)
+
+    file = discord.File(fp=io.BytesIO(ids.encode()), filename="member_ids.txt")
+    await interaction.followup.send("ok here (noobi)", file=file)
+
 
 # Fixed /remove command - properly handles queue management
 @bot.tree.command(name="remove", description="removes ur own songs from the queue")
