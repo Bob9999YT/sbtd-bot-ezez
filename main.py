@@ -428,104 +428,6 @@ async def ensure_llama3_installed():
     except Exception as e:
         logger.error(f"Failed to verify or install llama3: {e}")
         return False
-
-@bot.tree.command(name="roast-v2", description="ez")
-@app_commands.describe(user="the user idk")
-async def roast(interaction: Interaction, user: User):
-    if user.id in BLACKLIST:
-        await interaction.response.send_message(
-            f"haha {interaction.user.mention} tried to roast **{user.display_name}** but instead failed but bc bro is gay 💀💀💀",
-        )
-        return
-
-    await interaction.response.defer()
-
-    # Check if llama3 is available
-    if not await ensure_llama3_installed():
-        await interaction.followup.send(
-            f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (llama3 not available)",
-        )
-        return
-
-    prompt = (
-        f"roast a Discord user named '{user.display_name}'. "
-        "be offenive, edgy, and funny, and use popular emojis in the list, like the skull emoji or the rose emoji for examples"
-        "use the username multiple times and make just ONE line and just provide the roast, no extra"
-    )
-
-    # Ollama format:
-    payload = {
-        "model": "llama3",
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": 0.9,
-            "num_predict": 120
-        }
-    }
-
-    retry_attempts = 3
-    delay = 2
-
-    for attempt in range(retry_attempts):
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post("http://localhost:11434/api/generate", json=payload)
-
-                # Debug: print status and response
-                print(f"Status: {response.status_code}")
-                print(f"Response: {response.text}")
-
-                response.raise_for_status()
-                data = response.json()
-
-                # Try different response formats
-                roast_text = None
-                if "results" in data and len(data["results"]) > 0:
-                    roast_text = data["results"][0].get("text")
-                elif "choices" in data and len(data["choices"]) > 0:
-                    roast_text = data["choices"][0].get("text") or data["choices"][0].get("message", {}).get("content")
-                elif "response" in data:
-                    roast_text = data["response"]
-                elif "text" in data:
-                    roast_text = data["text"]
-                elif "content" in data:
-                    roast_text = data["content"]
-
-                if roast_text and roast_text.strip():
-                    await interaction.followup.send(roast_text.strip())
-                    return
-                else:
-                    print(f"No valid text found in response: {data}")
-
-        except httpx.HTTPStatusError as e:
-            print(f"HTTP Error {e.response.status_code}: {e.response.text}")
-            if e.response.status_code == 429:
-                print(f"Rate limited, retrying in {delay} seconds (attempt {attempt + 1})")
-                await asyncio.sleep(delay)
-                delay *= 2
-            else:
-                await interaction.followup.send(
-                    f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (HTTP {e.response.status_code})",
-                )
-                return
-
-        except httpx.ConnectError as e:
-            print(f"Connection failed (attempt {attempt + 1}): {e}")
-            if attempt < retry_attempts - 1:
-                await asyncio.sleep(delay)
-                delay *= 2
-
-        except Exception as e:
-            print(f"Unexpected error: {e}")
-            await interaction.followup.send(
-                f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀: {type(e).__name__}",
-            )
-            return
-
-    # If all attempts failed
-    await interaction.followup.send(
-        f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (service unavailable)",
     )
 
 HUGGINGFACE_API_KEY = os.environ.get("HUGGINGFACE_API_KEY")
@@ -722,12 +624,190 @@ async def ban_command(interaction: discord.Interaction, username: str, duration:
         await interaction.followup.send(f"request err: 💀💀💀 {type(e).__name__}", ephemeral=True)
 
 
-@bot.tree.command(name="skip",
-                  description="skips to the next track (requires manage messages permission or being the host)")
+# Fixed /roast-v2 command - better Ollama connection handling
+@bot.tree.command(name="roast-v2", description="ez")
+@app_commands.describe(user="the user idk")
+async def roast(interaction: Interaction, user: User):
+    if user.id in BLACKLIST:
+        await interaction.response.send_message(
+            f"haha {interaction.user.mention} tried to roast **{user.display_name}** but instead failed but bc bro is gay 💀💀💀",
+        )
+        return
+
+    await interaction.response.defer()
+
+    # Enhanced Ollama availability check
+    async def check_ollama_service():
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # First check if Ollama is running
+                resp = await client.get("http://localhost:11434/api/version")
+                resp.raise_for_status()
+                
+                # Then check if llama3 model is available
+                tags_resp = await client.get("http://localhost:11434/api/tags")
+                tags_resp.raise_for_status()
+                tags = tags_resp.json()
+                models = [model["name"] for model in tags.get("models", [])]
+                
+                # Check for any llama3 variant
+                available_models = [m for m in models if "llama3" in m.lower()]
+                if available_models:
+                    return available_models[0]  # Return first available llama3 model
+                else:
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Ollama service check failed: {e}")
+            return None
+
+    # Check Ollama availability
+    available_model = await check_ollama_service()
+    if not available_model:
+        await interaction.followup.send(
+            f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (ollama service not available)",
+        )
+        return
+
+    prompt = (
+        f"roast a Discord user named '{user.display_name}'. "
+        "be offensive, edgy, and funny, and use popular emojis like the skull emoji 💀 or fire emoji 🔥. "
+        f"use the username {user.display_name} multiple times and make just ONE line roast. "
+        "just provide the roast, no extra text or explanations"
+    )
+
+    payload = {
+        "model": available_model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {
+            "temperature": 0.9,
+            "num_predict": 100,
+            "top_k": 40,
+            "top_p": 0.9
+        }
+    }
+
+    retry_attempts = 3
+    delay = 2
+
+    for attempt in range(retry_attempts):
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                response = await client.post("http://localhost:11434/api/generate", json=payload)
+                response.raise_for_status()
+                data = response.json()
+
+                # Extract roast text from Ollama response
+                roast_text = data.get("response", "").strip()
+                
+                if roast_text:
+                    # Clean up the response - remove any extra formatting
+                    roast_text = roast_text.replace('\n', ' ').strip()
+                    await interaction.followup.send(roast_text)
+                    return
+                else:
+                    logger.warning(f"Empty response from Ollama: {data}")
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                await interaction.followup.send(
+                    f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (model not found)",
+                )
+                return
+            elif e.response.status_code == 500:
+                logger.error(f"Ollama server error: {e.response.text}")
+                if attempt < retry_attempts - 1:
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                    continue
+            else:
+                logger.error(f"HTTP Error {e.response.status_code}: {e.response.text}")
+
+        except httpx.ConnectError:
+            logger.error(f"Cannot connect to Ollama service (attempt {attempt + 1})")
+            if attempt < retry_attempts - 1:
+                await asyncio.sleep(delay)
+                delay *= 2
+
+        except Exception as e:
+            logger.error(f"Unexpected error in roast command: {e}")
+            await interaction.followup.send(
+                f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀: {type(e).__name__}",
+            )
+            return
+
+    # If all attempts failed
+    await interaction.followup.send(
+        f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (ollama service unavailable)",
+    )
+
+
+# Fixed /remove command - properly handles queue management
+@bot.tree.command(name="remove", description="removes ur own songs from the queue")
+async def remove_command(interaction: discord.Interaction):
+    queue = get_queue(interaction.guild.id)
+    
+    if not queue:
+        await interaction.response.send_message("theres nothing in the queue to remove 💀", ephemeral=True)
+        return
+
+    # Find user's tracks in the queue
+    user_tracks = []
+    for i, track in enumerate(queue):
+        if track.user_id == interaction.user.id:
+            user_tracks.append((i, track))
+
+    if not user_tracks:
+        await interaction.response.send_message("u dont have any songs in the queue 💀", ephemeral=True)
+        return
+
+    # If user has only one song, remove it directly
+    if len(user_tracks) == 1:
+        queue_pos, track = user_tracks[0]
+        queue_list = list(queue)
+        removed_track = queue_list.pop(queue_pos)
+        queue.clear()
+        queue.extend(queue_list)
+        
+        await interaction.response.send_message(f"removed from queue: **{removed_track.title}**", ephemeral=True)
+        return
+
+    # If user has multiple songs, show selection interface
+    embed = discord.Embed(
+        title="select which song to remove:",
+        description="choose which of ur songs to remove from the queue:",
+        color=0xff0000
+    )
+
+    for i, (queue_pos, track) in enumerate(user_tracks[:5]):  # Show max 5 songs
+        embed.add_field(
+            name=f"{i + 1}. {track.title}",
+            value=f"position in queue: {queue_pos + 1}",
+            inline=False
+        )
+
+    if len(user_tracks) > 5:
+        embed.add_field(
+            name="note:",
+            value=f"showing first 5 of {len(user_tracks)} songs",
+            inline=False
+        )
+
+    view = TrackRemovalView(interaction.user.id, queue, user_tracks)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+# Fixed /skip command - enhanced permission checking and error handling
+@bot.tree.command(name="skip", description="skips to the next track (requires manage messages permission or being the host)")
 async def skip_command(interaction: discord.Interaction):
     voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
 
-    if not voice_client or not voice_client.is_connected() or not voice_client.is_playing():
+    if not voice_client or not voice_client.is_connected():
+        await interaction.response.send_message("bot is not connected to a voice channel 💀", ephemeral=True)
+        return
+
+    if not voice_client.is_playing():
         await interaction.response.send_message("nothing is playing 💀💀💀", ephemeral=True)
         return
 
@@ -736,97 +816,291 @@ async def skip_command(interaction: discord.Interaction):
     perms = interaction.user.guild_permissions
 
     # Check if user can skip:
-    # 1. Has manage messages permission
-    # 2. Is the host and current song is their own
+    # 1. Has manage messages permission (moderator)
+    # 2. Is the host (started the music session)
+    # 3. Current song is their own (can skip their own songs)
     can_skip = False
+    skip_reason = ""
 
     if perms.manage_messages:
         can_skip = True
-    elif host_id == interaction.user.id and current_track and current_track.user_id == interaction.user.id:
+        skip_reason = "moderator"
+    elif host_id == interaction.user.id:
         can_skip = True
+        skip_reason = "host"
+    elif current_track and current_track.user_id == interaction.user.id:
+        can_skip = True
+        skip_reason = "own song"
 
     if not can_skip:
         await interaction.response.send_message(
-            "this server aint no playground 💯💯",
-            ephemeral=True)
+            "u cant skip this track 💀 (need manage messages permission, be the host, or skip ur own song)",
+            ephemeral=True
+        )
         return
 
     track_name = current_track.title if current_track else "current track"
+    
+    # Stop current track (this will trigger the after_playing callback)
+    voice_client.stop()
+    
+    # Check if there's anything in queue
+    queue = get_queue(interaction.guild.id)
+    if queue:
+        await interaction.response.send_message(f"⏭️ skipped: **{track_name}**")
+    else:
+        await interaction.response.send_message(f"⏭️ skipped: **{track_name}** (queue is now empty)")
 
-    voice_client.stop()  # This will trigger the after_playing callback which plays next track
-    await interaction.response.send_message(f"skipped: **{track_name}**", ephemeral=True)
 
-
+# Fixed /leave command - enhanced permission checking and cleanup
 @bot.tree.command(name="leave", description="makes the bot leave the voice channel")
 async def leave_command(interaction: discord.Interaction):
     voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
 
     if not voice_client or not voice_client.is_connected():
-        await interaction.response.send_message("bro tried to leave without joining 💀", ephemeral=True)
+        await interaction.response.send_message("bot is not in a voice channel 💀", ephemeral=True)
         return
 
     queue = get_queue(interaction.guild.id)
     current_track = currently_playing.get(interaction.guild.id)
+    host_id = current_player.get(interaction.guild.id)
     perms = interaction.user.guild_permissions
 
     # Check if there's music playing or in queue
     has_music = current_track is not None or len(queue) > 0
+    
+    # Permission check - allow if:
+    # 1. User has manage messages permission (moderator)
+    # 2. User is the host and no one else has songs
+    # 3. No music is playing/queued
+    can_leave = False
+    
+    if perms.manage_messages:
+        can_leave = True
+    elif not has_music:
+        can_leave = True
+    elif host_id == interaction.user.id:
+        # Host can leave if only their songs remain
+        only_host_songs = True
+        
+        # Check current track
+        if current_track and current_track.user_id != host_id:
+            only_host_songs = False
+        
+        # Check queue
+        if only_host_songs:
+            for track in queue:
+                if track.user_id != host_id:
+                    only_host_songs = False
+                    break
+        
+        if only_host_songs:
+            can_leave = True
 
-    # If there's music and user doesn't have manage messages, deny
-    if has_music and not perms.manage_messages:
+    if not can_leave:
         await interaction.response.send_message(
-            "bro tried to make the bot leave 💀💀", ephemeral=True)
+            "cant make the bot leave while music is playing 💀 (need manage messages permission or be the host with only ur songs)",
+            ephemeral=True
+        )
         return
 
-    # Use enhanced cleanup
-    await cleanup_voice_client(interaction.guild.id)
-    await interaction.response.send_message("ight ima leave this is a l vc only noobi is here 💀💀", ephemeral=True)
+    # Enhanced cleanup
+    try:
+        await cleanup_voice_client(interaction.guild.id)
+        await interaction.response.send_message("👋 left the voice channel")
+    except Exception as e:
+        logger.error(f"Error during leave command: {e}")
+        await interaction.response.send_message("left the voice channel (with some errors 💀)", ephemeral=True)
 
 
-@bot.tree.command(name="stop", description="stops the current audio thats playing in a vc")
+# Fixed /stop command - enhanced permission checking and queue management
+@bot.tree.command(name="stop", description="stops the current audio and clears the queue")
 async def stop_command(interaction: discord.Interaction):
     voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
 
-    if not voice_client or not voice_client.is_connected() or not voice_client.is_playing():
-        await interaction.response.send_message("l nothing is playing 💀", ephemeral=True)
+    if not voice_client or not voice_client.is_connected():
+        await interaction.response.send_message("bot is not in a voice channel 💀", ephemeral=True)
         return
 
-    player_id = current_player.get(interaction.guild.id)
-    perms = interaction.user.guild_permissions
-
-    # Check if user is the player OR has Move Members permission
-    if player_id != interaction.user.id and not perms.move_members:
-        await interaction.response.send_message("bro tried to stop it without starting it 💀💀💀💀", ephemeral=True)
+    if not voice_client.is_playing():
+        await interaction.response.send_message("nothing is playing 💀", ephemeral=True)
         return
 
-    # Check if there are other people's songs in the queue
     queue = get_queue(interaction.guild.id)
     current_track = currently_playing.get(interaction.guild.id)
+    host_id = current_player.get(interaction.guild.id)
+    perms = interaction.user.guild_permissions
 
-    # Check if current track belongs to someone else
-    other_peoples_songs = False
-    if current_track and current_track.user_id != interaction.user.id:
-        other_peoples_songs = True
+    # Permission check - allow if:
+    # 1. User has manage messages permission (moderator)
+    # 2. User is the host
+    # 3. Only user's own songs are playing/queued
+    can_stop = False
+    
+    if perms.manage_messages:
+        can_stop = True
+    elif host_id == interaction.user.id:
+        can_stop = True
+    else:
+        # Check if only user's songs are in queue/playing
+        only_user_songs = True
+        
+        # Check current track
+        if current_track and current_track.user_id != interaction.user.id:
+            only_user_songs = False
+        
+        # Check queue
+        if only_user_songs:
+            for track in queue:
+                if track.user_id != interaction.user.id:
+                    only_user_songs = False
+                    break
+        
+        if only_user_songs:
+            can_stop = True
 
-    # Check if queue has other people's songs
-    if not other_peoples_songs:
-        for track in queue:
-            if track.user_id != interaction.user.id:
-                other_peoples_songs = True
-                break
-
-    # If there are other people's songs and user doesn't have manage messages, deny
-    if other_peoples_songs and not perms.manage_messages:
+    if not can_stop:
         await interaction.response.send_message(
-            "bro tried to stop with songs pending 💀💀💀",
-            ephemeral=True)
+            "cant stop the music 💀 (need manage messages permission, be the host, or only have ur own songs)",
+            ephemeral=True
+        )
         return
 
-    # Clear the queue and stop
+    # Count items being cleared
+    queue_count = len(queue)
+    current_song = current_track.title if current_track else "unknown"
+    
+    # Clear the queue and stop playback
     queue.clear()
-
+    currently_playing.pop(interaction.guild.id, None)
+    
+    # Stop the current track
     voice_client.stop()
-    await interaction.response.send_message("ok fine ima stop", ephemeral=True)
+    
+    if queue_count > 0:
+        await interaction.response.send_message(
+            f"⏹️ stopped: **{current_song}** and cleared {queue_count} songs from queue"
+        )
+    else:
+        await interaction.response.send_message(f"⏹️ stopped: **{current_song}**")
+
+
+# Enhanced play_next_track function with better error handling
+async def play_next_track(guild, voice_client):
+    queue = get_queue(guild.id)
+
+    # Enhanced voice client validation
+    if not voice_client or not voice_client.is_connected():
+        logger.warning("Voice client is None or not connected")
+        await cleanup_voice_client(guild.id)
+        return
+
+    # Check if we should disconnect
+    if await should_disconnect(guild.id):
+        logger.info("Should disconnect - queue empty or host left")
+        await asyncio.sleep(DISCONNECT_DELAY)
+        if await should_disconnect(guild.id):
+            await cleanup_voice_client(guild.id)
+            logger.info("Disconnected - queue empty or host left")
+        return
+
+    if not queue:
+        logger.info("Queue is empty, nothing to play")
+        currently_playing.pop(guild.id, None)  # Clear currently playing
+        return
+
+    track = queue.popleft()
+    currently_playing[guild.id] = track
+
+    # Enhanced yt-dlp options for streaming
+    ydl_opts = {
+        "format": "bestaudio[ext=webm]/bestaudio/best",
+        "quiet": True,
+        "noplaylist": True,
+        "socket_timeout": 30,
+        "retries": 5,
+        "fragment_retries": 5,
+        "extractaudio": False,
+        "audioformat": "best",
+        "outtmpl": "%(extractor)s-%(id)s-%(title)s.%(ext)s",
+        # Enhanced options to handle sign-in detection
+        "cookiefile": None,
+        "extractor_args": {
+            "youtube": {
+                "skip": ["dash", "hls"]
+            }
+        },
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+    }
+
+    try:
+        logger.info(f"Getting stream URL for track: {track.title}")
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(track.url, download=False)
+            
+            # Get the direct stream URL
+            stream_url = None
+            if 'url' in info:
+                stream_url = info['url']
+            elif 'formats' in info and info['formats']:
+                # Find best audio format
+                audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none']
+                if audio_formats:
+                    stream_url = audio_formats[0]['url']
+                else:
+                    stream_url = info['formats'][0]['url']
+            
+            if not stream_url:
+                raise Exception("Could not extract stream URL")
+
+            logger.info(f"Got stream URL for: {track.title}")
+
+    except yt_dlp.utils.ExtractorError as e:
+        error_msg = str(e).lower()
+        if "sign in" in error_msg or "confirm" in error_msg or "bot" in error_msg:
+            logger.error(f"YouTube sign-in required for track: {track.title}")
+        else:
+            logger.error(f"Extractor error for track {track.title}: {e}")
+        # Try to play next track
+        await play_next_track(guild, voice_client)
+        return
+    except Exception as e:
+        logger.error(f"Failed to get stream URL for track {track.title}: {e}")
+        # Try to play next track
+        await play_next_track(guild, voice_client)
+        return
+
+    def after_playing(error):
+        if error:
+            logger.error(f"Player error: {error}")
+
+        # Schedule next track
+        fut = asyncio.run_coroutine_threadsafe(play_next_track(guild, voice_client), bot.loop)
+        try:
+            fut.result()
+        except Exception as e:
+            logger.error(f"Error in next track task: {e}")
+
+    try:
+        # Enhanced FFmpeg options for better streaming
+        ffmpeg_options = {
+            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -http_persistent false',
+            'options': '-vn -bufsize 1024k'
+        }
+
+        logger.info(f"Starting playback: {track.title}")
+        voice_client.play(
+            discord.FFmpegPCMAudio(source=stream_url, **ffmpeg_options),
+            after=after_playing
+        )
+        logger.info("Playback started successfully")
+
+    except Exception as e:
+        logger.error(f"Error starting playback for {track.title}: {e}")
+        # Try next track
+        await play_next_track(guild, voice_client)
 
 
 class QueueView(discord.ui.View):
