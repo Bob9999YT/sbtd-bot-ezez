@@ -1,3 +1,9 @@
-discord.py
+httpx
+requests
+aiohttp
 python-dotenv
-flask
+replicate
+serverig
+pynacl
+discord.py
+yt-dlp
