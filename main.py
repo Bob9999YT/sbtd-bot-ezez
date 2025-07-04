@@ -395,6 +395,40 @@ BLACKLIST = {
     69
 }
 
+async def ensure_llama3_installed():
+    """Check if llama3 is installed and install it if not"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Check if Ollama is running
+            try:
+                resp = await client.get("http://localhost:11434/api/tags")
+                resp.raise_for_status()
+                tags = resp.json()
+                models = [model["name"] for model in tags.get("models", [])]
+                
+                if "llama3" not in models:
+                    logger.info("llama3 not found. Attempting to pull it...")
+                    
+                    # Pull llama3 model
+                    pull_resp = await client.post("http://localhost:11434/api/pull", json={"name": "llama3"})
+                    pull_resp.raise_for_status()
+                    logger.info("llama3 successfully pulled.")
+                    return True
+                else:
+                    logger.info("llama3 is already installed.")
+                    return True
+                    
+            except httpx.ConnectError:
+                logger.warning("Ollama service not available at localhost:11434")
+                return False
+            except httpx.HTTPStatusError as e:
+                logger.error(f"HTTP error checking Ollama: {e}")
+                return False
+                
+    except Exception as e:
+        logger.error(f"Failed to verify or install llama3: {e}")
+        return False
+
 @bot.tree.command(name="roast-v2", description="ez")
 @app_commands.describe(user="the user idk")
 async def roast(interaction: Interaction, user: User):
@@ -405,6 +439,13 @@ async def roast(interaction: Interaction, user: User):
         return
 
     await interaction.response.defer()
+
+    # Check if llama3 is available
+    if not await ensure_llama3_installed():
+        await interaction.followup.send(
+            f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (llama3 not available)",
+        )
+        return
 
     prompt = (
         f"roast a Discord user named '{user.display_name}'. "
@@ -429,12 +470,7 @@ async def roast(interaction: Interaction, user: User):
     for attempt in range(retry_attempts):
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                # Try different common endpoints based on your service:
-                # Ollama: http://localhost:11434/api/generate
-                # LM Studio: http://localhost:1234/v1/completions
-                # Text Generation WebUI: http://localhost:7860/api/v1/generate
-
-                response = await client.post("http://localhost:11434/api/generate", json=payload)  # Ollama default
+                response = await client.post("http://localhost:11434/api/generate", json=payload)
 
                 # Debug: print status and response
                 print(f"Status: {response.status_code}")
@@ -491,7 +527,6 @@ async def roast(interaction: Interaction, user: User):
     await interaction.followup.send(
         f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (service unavailable)",
     )
-
 
 HUGGINGFACE_API_KEY = os.environ.get("HUGGINGFACE_API_KEY")
 
@@ -654,6 +689,9 @@ async def ban_command(interaction: discord.Interaction, username: str, duration:
         await interaction.response.send_message("bros not a mod 💀💀", ephemeral=True)
         return
 
+    # Defer the response immediately to prevent timeout
+    await interaction.response.defer()
+
     duration = duration.lower()
     if not any(duration.endswith(suffix) for suffix in ["m", "h", "d", "w", "y"]):
         duration = 0
@@ -667,93 +705,21 @@ async def ban_command(interaction: discord.Interaction, username: str, duration:
     }
 
     try:
-        response = requests.post(WEBHOOK_URL, json=payload)
-        if response.status_code == 200:
-            await interaction.response.send_message(f"the dumbah `{username}` has been banned from sbtd 💀")
-        else:
-            await interaction.response.send_message(f"skill issue: {response.status_code}", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"request err: 💀💀💀 {e}", ephemeral=True)
-
-@bot.tree.command(name="play", description="plays a yt video in ur vc that ur currently in")
-@app_commands.describe(url="a youtube video url (duh)")
-async def play_command(interaction: discord.Interaction, url: str):
-    voice_state = interaction.user.voice
-
-    if not voice_state or not voice_state.channel:
-        await interaction.response.send_message(
-            "bro didnt join a vc 💀", ephemeral=True
-        )
-        return
-
-    if not youtube_regex.match(url):
-        await interaction.response.send_message(
-            "l imagine putting smth else in the prompt 💀", ephemeral=True
-        )
-        return
-
-    await interaction.response.defer(ephemeral=True)
-
-    # Extract video info first
-    ydl_opts = {
-        "quiet": True,
-        "noplaylist": True,
-        "socket_timeout": 30,
-        "retries": 3,
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            title = info.get('title', 'Unknown Title')
-            duration = info.get('duration', None)
-    except Exception as e:
-        await interaction.followup.send(f"failed to get video info: {e}", ephemeral=True)
-        return
-
-    track = TrackInfo(url, title, interaction.user.id, interaction.user.display_name, duration)
-    queue = get_queue(interaction.guild.id)
-    voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
-    vc_channel = voice_state.channel
-
-    # If nothing is playing, start immediately
-    if not voice_client or not voice_client.is_playing():
-        current_player[interaction.guild.id] = interaction.user.id
-
-        try:
-            if voice_client and voice_client.is_connected():
-                if voice_client.channel != vc_channel:
-                    logger.info(f"Moving voice client to {vc_channel}")
-                    await voice_client.move_to(vc_channel)
-                else:
-                    logger.info(f"Voice client already connected to {vc_channel}")
+        # Use async http client with timeout
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(WEBHOOK_URL, json=payload)
+            
+            if response.status_code == 200:
+                await interaction.followup.send(f"the dumbah {username} has been banned from sbtd 💀")
             else:
-                logger.info(f"Connecting to voice channel {vc_channel}...")
-                voice_client = await connect_to_voice_channel(vc_channel)
-
-                if not voice_client:
-                    retry_count = connection_retries.get(interaction.guild.id, 0)
-                    await interaction.followup.send(
-                        f"failed to connect to VC after {retry_count} attempts. "
-                        f"skill issue ngl 💀",
-                        ephemeral=True
-                    )
-                    return
-
-        except Exception as e:
-            logger.error(f"Unexpected error connecting to VC: {e}")
-            await interaction.followup.send(f"failed to connect to VC: {e}", ephemeral=True)
-            return
-
-        # Add to queue and play immediately
-        queue.append(track)
-        await interaction.followup.send(f"ight ima play: **{title}**", ephemeral=True)
-        await play_next_track(interaction.guild, voice_client)
-    else:
-        # Add to queue
-        queue.append(track)
-        queue_position = len(queue)
-        await interaction.followup.send(f"added to queue (#{queue_position}): **{title}**", ephemeral=True)
+                await interaction.followup.send(f"skill issue: {response.status_code}", ephemeral=True)
+                
+    except httpx.TimeoutException:
+        await interaction.followup.send(f"request timed out 💀💀💀", ephemeral=True)
+    except httpx.ConnectError:
+        await interaction.followup.send(f"connection failed 💀💀💀", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"request err: 💀💀💀 {type(e).__name__}", ephemeral=True)
 
 
 @bot.tree.command(name="skip",
