@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "sigma-video",
+  "private_key_id": "d3423afbc7a3a477e19882169a549921d60ab021",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQDRopcAEkiQ56/0\nKspG+4Iu7QB+OYVQQwoAIh4yeBTmwNkobSvYMCpkgecTouA/R3TJL96bSN713KxM\nhwDSqF3ZlR1fOK/NhWHJKfoZO7Wo1C6m/iGEiAkk9jELP5bsLxopsJ43b/zSPeZF\nvIMKjIw1e/5u6J6EBvXrUjnbvONtC4lH1r5dleABCFjs6uWZPyVC5uRWGQ3cgPPl\nbpqWq+lrBI2UNfYRtDZ+s5w9Ue5Q5+vYB2iSIXC6qV16ZMXCKEjfQKOAR+Lu2RnK\nU4spSQ0Z6lCSz9mWb1iti6AG5xqFzefDWJgd4ogSQML7VX0P5+FujnH0De271hak\nKyoX1xhjAgMBAAECggEADkKpCYYQTe6XGbiMmJqt5I5x4pH7/TEG1vxWmBrgf/hE\naOJQ3ROK2iMpNfO/L27L8yDJya2UDlXSvrKFeap6Fr295HlaRnjwLmSVnqTzUZSg\n683DyjgNE8Qq/sVR5xUm5gkdjry4xRCC5E9BRH4CzogID4qDuEMyqxs31BPSoLan\n0RS+qao6iAykQXgYlUK6dj7t6ZpaAuOFfbkC3Wv8bF5pR4wf4hieBa0ExGxfsrjL\nFyGW7R+mfyNq3NwKVdWCcLVWHlZlqwNCXT3S5DCp7PzqJHxdBcmruQUsDi+CtWxC\nNeCnDeexUZcN9jBtCUWOWKTEX1Zy17vAEHs4pICwGQKBgQD+TYlC+dbY7p+T9PVX\nSVxiP3+Hkbw0G16CIH96nITubpJSkV2J7w5PC2/YIzc1HSIyAn/2wsVTq7CJN1He\naV3IkIiAsCaGdrySk1xXCZYIgQX6X79aLHWRmGQ+gf3bYMLDv+AgZ+w0UKSpZRz4\npwvE8sV8P+nIrRMWJIRKKoGsBQKBgQDTCL2zhpuzgWXjkZYqQrwEZR2B3VOYR0TL\nXBmb2tDphoqp59ElXotZ+dZZiEQ1bWWYG0RnbLki0BtfhYJ3JkSGmFkxYExQNNL0\nsykrn9obsW3O4TDyAVX0C9MUYSlYUwynnG/bqyxKvbVLGrCXmzPCvpgiBSBJfHik\nfmFejW9HRwKBgQCzYNX1nG3kT03Y++0jSOgVlVzLsAzlZHjhqTLCti0+Ulh8TXWB\nmlKphxO5jf2fRZGdXQ4ObYzrXCwGXjMtg31XwDvJKnfCWXbinXeBHY3rKbehyHAd\nl0bHEIuFXARI/pPjqDDcKvH+ZPQBWQV6j7pJjkWnQx4RI6RW9iMqfZlCUQKBgQCU\nP8S8FCjXHmTMTB74iy73y2zCKRArno1WatnWog42rvxERYSoQtWUHK2W8eIwwiwn\ngag5G6inKxi/rtOrDif/gZDO3f5eLe2wVxfp/H7FC4y/U3UF3Shbq97ZpzPbR2RR\nbtUptQMFcmWkYBiEOFRRT4EiDQXUeetqaxnNyX/NywKBgQCSbWi4DDwuZSUpPnsP\n2j4ZdWUuxauOXZd6zr6mwN26T9fUJ+WgnRyqe5C587oY4jF7V6sSEYdlRik05Dvj\nBFtWeoQ7fZtRhmlbLZSfc+NhKJy7l7kutJWTnzHOh82GJ46n9+Ed9jvc8BscIt/J\n9LuQcs1K7MZqFmNVHlc+rEKDuA==\n-----END PRIVATE KEY-----\n",
+  "client_email": "sigma-on-walls@sigma-video.iam.gserviceaccount.com",
+  "client_id": "100349172387101459077",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/sigma-on-walls%40sigma-video.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
