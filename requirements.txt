@@ -7,3 +7,5 @@ serverig
 pynacl
 discord.py
 yt-dlp
+threading
+flash
