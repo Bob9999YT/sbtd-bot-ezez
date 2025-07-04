@@ -789,35 +789,43 @@ async def play_command(interaction: discord.Interaction, url: str):
 
 @bot.tree.command(name="export-ids", description="noobi asked me for this")
 async def export_ids(interaction: discord.Interaction):
-    """Export all guild member IDs to a text file"""
+    """llll"""
     try:
-        # Get all members from the guild
+        # Defer the response since fetching members can take time
+        await interaction.response.defer(ephemeral=True)
+        
+        # Fetch all members from the guild (this loads them into cache)
+        async for member in interaction.guild.fetch_members(limit=None):
+            pass  # This populates the member cache
+        
+        # Now get all members from the guild
         members = interaction.guild.members
-
+        
         # Create filename with guild name and timestamp
         guild_name = interaction.guild.name.replace(' ', '_')
         filename = f"{guild_name}_member_ids.txt"
-
+        
         # Write member IDs to file
         with open(filename, 'w', encoding='utf-8') as f:
-            f.write(f"ids for {interaction.guild.name}\n")
-            f.write(f"members: {len(members)}\n")
+            f.write(f"member IDs for {interaction.guild.name}\n")
+            f.write(f"memebers: {len(members)}\n")
             f.write("=" * 50 + "\n\n")
-
+            
             for member in members:
                 # Write ID and username for easier identification
                 f.write(f"{member.id} - {member.display_name}\n")
-
+        
+        # Send the file as an attachment
         file = discord.File(filename)
         await interaction.response.send_message(
-            f"ok noobi heres {len(members)} ids in a txt",
+            f"ok noobi heres {len(members)} ids in a txt:",
             file=file,
             ephemeral=True
         )
-
+        
     except Exception as e:
         await interaction.response.send_message(
-            f"lll theres a err {str(e)}",
+            f"err💀💀💀💀 {str(e)}",
             ephemeral=True
         )
 
