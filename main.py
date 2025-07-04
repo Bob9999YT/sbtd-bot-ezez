@@ -25,8 +25,8 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 # Auto-install PyNaCl if missing
-try:
-    import nacl
+try:dsfz
+    import naclfdes
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pynacl"])
     import nacl
@@ -85,9 +85,6 @@ ALLOWED_USER_IDS = {
     864958103103078470, # "lol"
     1370566192280109098 # 2nd owner ig (this is bros fake gf i bet)
 }
-
-intents = discord.Intents.default()
-intents.members = True  # Add this line
 
 # Enhanced bot configuration
 bot = commands.Bot(
@@ -786,48 +783,6 @@ async def play_command(interaction: discord.Interaction, url: str):
         logger.error(f"Error in play command: {e}")
         await interaction.followup.send(f"something went wrong 💀", ephemeral=True)
 
-@bot.tree.command(name="export-ids", description="noobi asked me for this")
-async def export_ids(interaction: discord.Interaction):
-    """l"""
-    try:
-        # Defer the response since fetching members can take time
-        await interaction.response.defer(ephemeral=True)
-        
-        # Fetch all members from the guild (this loads them into cache)
-        async for member in interaction.guild.fetch_members(limit=None):
-            pass  # This populates the member cache
-        
-        # Now get all members from the guild
-        members = interaction.guild.members
-        
-        # Create filename with guild name and timestamp
-        guild_name = interaction.guild.name.replace(' ', '_')
-        filename = f"{guild_name}_member_ids.txt"
-        
-        # Write member IDs to file
-        with open(filename, 'w', encoding='utf-8') as f:
-            f.write(f"ids for {interaction.guild.name}\n")
-            f.write(f"members: {len(members)}\n")
-            f.write("=" * 50 + "\n\n")
-            
-            for member in members:
-                # Write ID and username for easier identification
-                f.write(f"{member.id} - {member.display_name}\n")
-        
-        # Send the file as an attachment
-        file = discord.File(filename)
-        await interaction.response.send_message(
-            f"ok noobi heres {len(members)} ids in a txt:",
-            file=file,
-            ephemeral=True
-        )
-        
-    except Exception as e:
-        await interaction.response.send_message(
-            f"lll err 💀💀💀: {str(e)}",
-            ephemeral=True
-        )
-
 
 # Fixed /remove command - properly handles queue management
 @bot.tree.command(name="remove", description="removes ur own songs from the queue")
@@ -920,7 +875,7 @@ async def skip_command(interaction: discord.Interaction):
 
     if not can_skip:
         await interaction.response.send_message(
-            "u cant skip this track 💀 (need manage messages permission, be the host, or skip ur own song)",
+            "lll 💀💀💀💀",
             ephemeral=True
         )
         return
