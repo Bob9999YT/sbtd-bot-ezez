@@ -623,11 +623,6 @@ async def generate_image(interaction: discord.Interaction, prompt: str):
     reason="self explaintory"
 )
 async def ban_command(interaction: discord.Interaction, username: str, duration: str, reason: str):
-    if interaction.user.id not in ALLOWED_USER_IDS:
-        await interaction.response.send_message("bros not a mod 💀💀", ephemeral=True)
-        return
-
-    # Defer the response immediately to prevent timeout
     await interaction.response.defer()
 
     duration = duration.lower()
