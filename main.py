@@ -428,7 +428,6 @@ async def ensure_llama3_installed():
     except Exception as e:
         logger.error(f"Failed to verify or install llama3: {e}")
         return False
-    )
 
 HUGGINGFACE_API_KEY = os.environ.get("HUGGINGFACE_API_KEY")
 
