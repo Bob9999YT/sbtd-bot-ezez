@@ -787,14 +787,39 @@ async def play_command(interaction: discord.Interaction, url: str):
         logger.error(f"Error in play command: {e}")
         await interaction.followup.send(f"something went wrong 💀", ephemeral=True)
 
-@bot.tree.command(name="export_ids", description="noobi asked me for this")
+@bot.tree.command(name="export-ids", description="noobi asked me for this")
 async def export_ids(interaction: discord.Interaction):
-    await interaction.response.defer()
-    members = interaction.guild.members
-    ids = "\n".join(str(member.id) for member in members)
+    """Export all guild member IDs to a text file"""
+    try:
+        # Get all members from the guild
+        members = interaction.guild.members
 
-    file = discord.File(fp=io.BytesIO(ids.encode()), filename="member_ids.txt")
-    await interaction.followup.send("ok here (noobi)", file=file)
+        # Create filename with guild name and timestamp
+        guild_name = interaction.guild.name.replace(' ', '_')
+        filename = f"{guild_name}_member_ids.txt"
+
+        # Write member IDs to file
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(f"ids for {interaction.guild.name}\n")
+            f.write(f"members: {len(members)}\n")
+            f.write("=" * 50 + "\n\n")
+
+            for member in members:
+                # Write ID and username for easier identification
+                f.write(f"{member.id} - {member.display_name}\n")
+
+        file = discord.File(filename)
+        await interaction.response.send_message(
+            f"ok noobi heres {len(members)} ids in a txt",
+            file=file,
+            ephemeral=True
+        )
+
+    except Exception as e:
+        await interaction.response.send_message(
+            f"lll theres a err {str(e)}",
+            ephemeral=True
+        )
 
 
 # Fixed /remove command - properly handles queue management
