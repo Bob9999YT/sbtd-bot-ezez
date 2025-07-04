@@ -14,6 +14,7 @@ import logging
 import replicate
 import pathlib
 import serverig
+import requests
 
 logger = logging.getLogger('discord')
 logger.setLevel(logging.INFO)
@@ -57,7 +58,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 
-WEBHOOK_URL = os.getenv("BAN_WEBHOOK_URL")
+WEBHOOK_URL = os.getenviron["BAN_WEBHOOK_URL"]
 ALLOWED_USER_IDS = {
     1134133832023560215, # bob
     886638615629811773, # ed
@@ -492,7 +493,7 @@ async def roast(interaction: Interaction, user: User):
     )
 
 
-HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+HUGGINGFACE_API_KEY = os.getenviron["HUGGINGFACE_API_KEY"]
 
 # Assuming you have a bot instance
 # bot = commands.Bot(command_prefix='!', intents=discord.Intents.default())
@@ -662,7 +663,7 @@ async def ban_command(interaction: discord.Interaction, username: str, duration:
         "duration": duration,
         "reason": reason,
         "mod": interaction.user.id,
-        "token": "os.getenv("BAN_TOKEN")
+        "token": os.getenviron["BAN_TOKEN"]
     }
 
     try:
