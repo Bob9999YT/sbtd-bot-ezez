@@ -1,4 +1,176 @@
+import os
+import re
+import io
+import subprocess
+import sys
+import httpx
+import logging
+import asyncio
+import requests
+import aiohttp
+from collections import deque
+from dotenv import load_dotenv
+import logging
+import replicate
+import pathlib
+import serverig
+import requests
+import typing
 
+logger = logging.getLogger('discord')
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
+# Auto-install PyNaCl if missing
+try:
+    import nacl
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pynacl"])
+    import nacl
+
+import discord
+from discord.ext import commands
+import base64
+from discord import app_commands
+from typing import Optional
+from discord import Interaction, User, app_commands
+from httpx import AsyncClient
+from httpx import HTTPStatusError
+import yt_dlp
+from io import BytesIO
+
+load_dotenv()
+token = os.environ.get("DISCORD_TOKEN")
+
+# Enhanced logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Reduce discord library logging
+logging.getLogger('discord').setLevel(logging.WARNING)
+logging.getLogger('discord.voice_state').setLevel(logging.WARNING)
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.voice_states = True
+
+WEBHOOK_URL = os.environ.get("BAN_WEBHOOK_URL")
+ALLOWED_USER_IDS = {
+    1134133832023560215, # bob
+    886638615629811773, # ed
+    889182558905069609, # nubi
+    944296234263384104, # tabby
+    1012767514507362315, # mono
+    883897095445160047, # the nub
+    771319425151795200, # vox
+
+    # fake mods (they're mod in scammer server) but theiir sbtd communuity memebers so yeah cool
+    939111471613370389, # citrus fluff
+    553573360508993557, # l another furry (united behavior)
+    584603465431515156, # archadium
+
+    # l scammers
+    1012549777319280700, # matrix
+    1384444338531991563, # goth
+    390715906449211393, # febeary
+    642498940918431755, # jovan who tf is this
+    1061958304684834826, # the "owner" with the gay ah tag
+    1267571976445235300, # who tf is this (bro has admin role)
+    864958103103078470, # "lol"
+    1370566192280109098 # 2nd owner ig (this is bros fake gf i bet)
+}
+
+# Enhanced bot configuration
+bot = commands.Bot(
+    command_prefix="?",
+    intents=intents,
+    reconnect=True,
+    enable_debug_events=False,
+    heartbeat_timeout=60.0,  # Increased heartbeat timeout
+    max_messages=None  # Disable message cache to save memory
+)
+
+current_player = {}  # guild.id -> user.id
+music_queues = {}  # guild.id -> deque of track info
+currently_playing = {}  # guild.id -> current track info
+connection_retries = {}  # guild.id -> retry count
+
+# Enhanced connection settings
+CONNECT_DELAY = 3  # Reduced delay
+DISCONNECT_DELAY = 1
+MAX_RETRIES = 5  # Increased max retries
+RETRY_DELAY = 2  # Base delay between retries
+
+youtube_regex = re.compile(
+    r'^(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+$'
+)
+
+
+class TrackInfo:
+    def __init__(self, url, title, user_id, user_name, duration=None, filename=None):
+        self.url = url
+        self.title = title
+        self.user_id = user_id
+        self.user_name = user_name
+        self.duration = duration
+        self.filename = filename
+
+
+def format_duration(seconds):
+    """Convert seconds to MM:SS format"""
+    if not seconds:
+        return "Unknown"
+
+    minutes = int(seconds // 60)
+    seconds = int(seconds % 60)
+    return f"{minutes}:{seconds:02d}"
+
+
+def get_queue(guild_id):
+    if guild_id not in music_queues:
+        music_queues[guild_id] = deque()
+    return music_queues[guild_id]
+
+
+async def cleanup_voice_client(guild_id):
+    """Clean up voice client and related data"""
+    voice_client = discord.utils.get(bot.voice_clients, guild=bot.get_guild(guild_id))
+
+    if voice_client and voice_client.is_connected():
+        try:
+            if voice_client.is_playing():
+                voice_client.stop()
+            await voice_client.disconnect(force=True)
+            logger.info(f"Cleaned up voice client for guild {guild_id}")
+        except Exception as e:
+            logger.error(f"Error cleaning up voice client for guild {guild_id}: {e}")
+
+    # Clean up data
+    current_player.pop(guild_id, None)
+    currently_playing.pop(guild_id, None)
+    connection_retries.pop(guild_id, None)
+    if guild_id in music_queues:
+        music_queues[guild_id].clear()
+
+
+async def connect_to_voice_channel(channel, max_retries=MAX_RETRIES):
+    """Enhanced voice connection with exponential backoff"""
+    guild_id = channel.guild.id
+
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Attempting to connect to {channel} (attempt {attempt + 1}/{max_retries})")
+
+            # Exponential backoff delay
+            if attempt > 0:
+                delay = RETRY_DELAY * (2 ** (attempt - 1))
+                logger.info(f"Waiting {delay} seconds before retry...")
                 await asyncio.sleep(delay)
 
             # Try to connect with timeout
