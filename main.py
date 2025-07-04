@@ -25,7 +25,7 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 # Auto-install PyNaCl if missing
-try:dsfz
+try:
     import naclfdes
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pynacl"])
