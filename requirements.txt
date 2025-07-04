@@ -3,9 +3,7 @@ requests
 aiohttp
 python-dotenv
 replicate
-serverig
 pynacl
 discord.py
 yt-dlp
-threading
-flash
+flask
