@@ -620,18 +620,28 @@ async def generate_image(interaction: discord.Interaction, prompt: str):
 @app_commands.describe(
     username="the roblox user to ban",
     duration="ban duration (1m, 1h, 1d, 1w, 1y)",
-    reason="self explaintory"
+    reason="sigma idk what to say for this"
 )
 async def ban_command(interaction: discord.Interaction, username: str, duration: str, reason: str):
-    await interaction.response.defer(ephemeral=True)
+    print("COMMAND STARTED")
+
+    try:
+        print("Defer interaction response...")
+        await interaction.response.defer(ephemeral=True)
+        print("Deferred successfully ✅")
+    except Exception as e:
+        print("❌ Defer failed:", type(e).__name__, "-", str(e))
+        return  # stop here if defer fails
 
     if interaction.user.id not in ALLOWED_USER_IDS:
+        print("Unauthorized user:", interaction.user.id)
         await interaction.followup.send("bros not a mod 💀💀", ephemeral=True)
         return
 
     duration = duration.lower()
     if not any(duration.endswith(suffix) for suffix in ["m", "h", "d", "w", "y"]):
-        duration = 0
+        print("Invalid duration format:", duration)
+        duration = "0"
 
     payload = {
         "username": username,
@@ -641,23 +651,35 @@ async def ban_command(interaction: discord.Interaction, username: str, duration:
         "token": os.environ.get("BAN_TOKEN")
     }
 
+    print("Payload ready:", payload)
+
     headers = {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "User-Agent": "DiscordBot/1.0"
     }
 
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
+        print("Sending POST to Google Script:", WEBHOOK_URL)
+        async with httpx.AsyncClient(follow_redirects=False, timeout=30.0) as client:
             response = await client.post(WEBHOOK_URL, json=payload, headers=headers)
 
-        print("RESPONSE TEXT:", response.text)  # Debug
+        print("POST result:", response.status_code)
+        print("Redirect location:", response.headers.get("location"))
+        print("Response body:", response.text)
 
         if response.status_code == 200:
             await interaction.followup.send(f"the dumbah {username} has been banned from sbtd 💀")
+        elif response.status_code == 302:
+            await interaction.followup.send(f"skill issue: 302 🔁 redirected", ephemeral=True)
         else:
             await interaction.followup.send(f"skill issue: {response.status_code}", ephemeral=True)
 
+    except httpx.HTTPError as e:
+        print("HTTPError:", str(e))
+        await interaction.followup.send(f"request died 💀 {type(e).__name__}", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"💀💀💀 error: {type(e).__name__}", ephemeral=True)
+        print("Unexpected error:", type(e).__name__, "-", str(e))
+        await interaction.followup.send(f"request err: 💀 {type(e).__name__}", ephemeral=True)
 
 # Enhanced play command with better error handling
 @bot.tree.command(name="play", description="plays music from youtube or adds to queue")
