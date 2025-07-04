@@ -586,6 +586,131 @@ async def ban_command(interaction: discord.Interaction, username: str, duration:
     except Exception as e:
         await interaction.followup.send(f"request err: 💀💀💀 {type(e).__name__}", ephemeral=True)
 
+# Fixed /play command - handles YouTube sign-in detection and adds proper error handling
+@bot.tree.command(name="play", description="plays music from youtube or adds to queue")
+@app_commands.describe(url="youtube url or search query")
+async def play_command(interaction: discord.Interaction, url: str):
+    await interaction.response.defer()
+
+    # Check if user is in a voice channel
+    if not interaction.user.voice:
+        await interaction.followup.send("bro join a vc first 💀", ephemeral=True)
+        return
+
+    channel = interaction.user.voice.channel
+    guild = interaction.guild
+
+    # Get or create voice client
+    voice_client = discord.utils.get(bot.voice_clients, guild=guild)
+
+    if not voice_client:
+        voice_client = await connect_to_voice_channel(channel)
+        if not voice_client:
+            await interaction.followup.send("failed to connect to vc 💀", ephemeral=True)
+            return
+        current_player[guild.id] = interaction.user.id
+
+    # Enhanced yt-dlp options to handle sign-in detection
+    ydl_opts = {
+        "format": "bestaudio[ext=webm]/bestaudio/best",
+        "quiet": True,
+        "noplaylist": True,
+        "socket_timeout": 30,
+        "retries": 5,
+        "fragment_retries": 5,
+        "extractaudio": False,
+        "audioformat": "best",
+        "outtmpl": "%(extractor)s-%(id)s-%(title)s.%(ext)s",
+        # Add cookies and headers to bypass sign-in detection
+        "cookiefile": None,
+        "extractor_args": {
+            "youtube": {
+                "skip": ["dash", "hls"]
+            }
+        },
+        # Add user agent to appear more like a regular browser
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+    }
+
+    try:
+        # If not a URL, search YouTube
+        if not youtube_regex.match(url):
+            url = f"ytsearch:{url}"
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # First try to extract info without downloading
+            try:
+                info = ydl.extract_info(url, download=False)
+            except yt_dlp.utils.ExtractorError as e:
+                error_msg = str(e).lower()
+                if "sign in" in error_msg or "confirm" in error_msg or "bot" in error_msg:
+                    await interaction.followup.send(
+                        f"youtube is being gay and asking for sign in 💀 try a different video or wait a bit",
+                        ephemeral=True
+                    )
+                    return
+                else:
+                    raise e
+
+            # Handle search results
+            if 'entries' in info:
+                if not info['entries']:
+                    await interaction.followup.send("no results found 💀", ephemeral=True)
+                    return
+                info = info['entries'][0]
+
+            if not info:
+                await interaction.followup.send("failed to get video info 💀", ephemeral=True)
+                return
+
+            title = info.get('title', 'Unknown')
+            duration = info.get('duration', 0)
+            webpage_url = info.get('webpage_url', url)
+
+            # Create track info
+            track = TrackInfo(
+                url=webpage_url,
+                title=title,
+                user_id=interaction.user.id,
+                user_name=interaction.user.display_name,
+                duration=duration
+            )
+
+            # Add to queue
+            queue = get_queue(guild.id)
+            queue.append(track)
+
+            # If nothing is playing, start playing
+            if not voice_client.is_playing():
+                await play_next_track(guild, voice_client)
+                await interaction.followup.send(f"now playing: **{title}**")
+            else:
+                position = len(queue)
+                await interaction.followup.send(f"added to queue (#{position}): **{title}**")
+
+    except yt_dlp.utils.ExtractorError as e:
+        error_msg = str(e).lower()
+        if "sign in" in error_msg or "confirm" in error_msg or "bot" in error_msg:
+            await interaction.followup.send(
+                f"youtube is being cringe and asking for sign in 💀 try a different video",
+                ephemeral=True
+            )
+        elif "private" in error_msg or "unavailable" in error_msg:
+            await interaction.followup.send(
+                f"video is private or unavailable 💀",
+                ephemeral=True
+            )
+        else:
+            await interaction.followup.send(
+                f"failed to process video 💀: {str(e)[:100]}",
+                ephemeral=True
+            )
+    except Exception as e:
+        logger.error(f"Error in play command: {e}")
+        await interaction.followup.send(f"something went wrong 💀", ephemeral=True)
+
 
 # Fixed /remove command - properly handles queue management
 @bot.tree.command(name="remove", description="removes ur own songs from the queue")
