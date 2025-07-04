@@ -45,6 +45,10 @@ from io import BytesIO
 load_dotenv()
 token = os.environ.get("DISCORD_TOKEN")
 
+intents = discord.Intents.default()
+intents.members = True
+intents.guilds = True
+
 # Enhanced logging configuration
 logging.basicConfig(
     level=logging.INFO,
@@ -849,9 +853,6 @@ async def remove_command(interaction: discord.Interaction):
 
 @bot.tree.command(name="export-ids", description="noobi asked me for this")
 async def export_ids(interaction: discord.Interaction):
-    intents = discord.Intents.default()
-intents.members = True
-intents.guilds = True
     await interaction.response.defer()
     members = interaction.guild.members
     ids = "\n".join(str(member.id) for member in members)
