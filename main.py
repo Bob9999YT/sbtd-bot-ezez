@@ -15,6 +15,7 @@ import replicate
 import pathlib
 import serverig
 import requests
+import typing
 
 logger = logging.getLogger('discord')
 logger.setLevel(logging.INFO)
@@ -34,6 +35,7 @@ import discord
 from discord.ext import commands
 import base64
 from discord import app_commands
+from typing import Optional
 from discord import Interaction, User, app_commands
 from httpx import AsyncClient
 from httpx import HTTPStatusError
