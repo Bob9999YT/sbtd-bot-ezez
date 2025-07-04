@@ -391,97 +391,156 @@ async def on_voice_state_update(member, before, after):
                     await cleanup_voice_client(guild.id)
                     logger.info(f"Host {member} left VC, bot disconnected")
 
-# Get Google Apps Script URL from environment variable
-GOOGLE_SCRIPT_URL = os.getenv("GOOGLE_SCRIPT_URL")
-BLACKLIST = []  # Add your blacklist here
+HUGGINGFACE_API_KEY = os.environ.get("HUGGINGFACE_API_KEY")
 
-async def call_llama3_via_google_script(prompt: str) -> Optional[str]:
-    """Call Llama3 via Google Apps Script proxy"""
-    if not GOOGLE_SCRIPT_URL:
-        logger.error("Google Script URL not configured")
+async def call_huggingface_api(prompt: str) -> Optional[str]:
+    """Call Hugging Face Inference API for text generation"""
+    if not HUGGINGFACE_API_KEY:
+        logger.error("Hugging Face API token not configured")
         return None
     
+    # Using a free model that's good for creative text generation
+    API_URL = "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium"
+    
+    headers = {
+        "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
     payload = {
-        "prompt": prompt
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 100,
+            "temperature": 0.9,
+            "do_sample": True,
+            "return_full_text": False
+        }
     }
     
     try:
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            response = await client.post(GOOGLE_SCRIPT_URL, json=payload)
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(API_URL, headers=headers, json=payload)
             response.raise_for_status()
             data = response.json()
             
-            if data.get("success"):
-                return data.get("response")
+            if isinstance(data, list) and len(data) > 0:
+                return data[0].get("generated_text", "").strip()
             else:
-                logger.error(f"Google Script error: {data.get('error')}")
+                logger.error(f"Unexpected response format: {data}")
                 return None
                 
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP Error calling Google Script: {e}")
+        logger.error(f"HTTP Error calling Hugging Face API: {e}")
         return None
     except httpx.ConnectError:
-        logger.error("Cannot connect to Google Script")
+        logger.error("Cannot connect to Hugging Face API")
         return None
     except Exception as e:
-        logger.error(f"Unexpected error calling Google Script: {e}")
+        logger.error(f"Unexpected error calling Hugging Face API: {e}")
+        return None
+
+# Alternative function using a different free model
+async def call_huggingface_text_generation(prompt: str) -> Optional[str]:
+    """Alternative using a different free model for better roasts"""
+    if not HUGGINGFACE_API_KEY:
+        logger.error("Hugging Face API token not configured")
+        return None
+    
+    # Using GPT-2 which is completely free and good for creative text
+    API_URL = "https://api-inference.huggingface.co/models/gpt2"
+    
+    headers = {
+        "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 50,
+            "temperature": 0.8,
+            "do_sample": True,
+            "return_full_text": False,
+            "pad_token_id": 50256
+        }
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(API_URL, headers=headers, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            
+            if isinstance(data, list) and len(data) > 0:
+                generated_text = data[0].get("generated_text", "").strip()
+                # Clean up the response to get just the roast
+                lines = generated_text.split('\n')
+                return lines[0] if lines else generated_text
+            else:
+                logger.error(f"Unexpected response format: {data}")
+                return None
+                
+    except httpx.HTTPStatusError as e:
+        logger.error(f"HTTP Error calling Hugging Face API: {e}")
+        return None
+    except httpx.ConnectError:
+        logger.error("Cannot connect to Hugging Face API")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error calling Hugging Face API: {e}")
         return None
 
 @bot.tree.command(name="roast-v2", description="ez")
 @app_commands.describe(user="the user idk")
-async def roast(interaction: Interaction, user: User):
-    if user.id in BLACKLIST:
-        await interaction.response.send_message(
-            f"haha {interaction.user.mention} tried to roast **{user.display_name}** but instead failed but bc bro is gay 💀💀💀",
-        )
-        return
-
+async def roast(interaction: Interaction, user: User):    
     await interaction.response.defer()
-
-    # Check if Google Script URL is configured
-    if not GOOGLE_SCRIPT_URL:
+    
+    # Check if Hugging Face API token is configured
+    if not HUGGINGFACE_API_KEY:
         await interaction.followup.send(
-            f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (service not configured)",
+            f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (bob is dumb and forgot to create the api key somehow)",
         )
         return
-
+    
     prompt = (
-        f"roast a Discord user named '{user.display_name}'. "
-        "be offensive, edgy, and funny, and use popular emojis like the skull emoji 💀 or fire emoji 🔥. "
-        f"use the username {user.display_name} multiple times and make just ONE line roast. "
-        "just provide the roast, no extra text or explanations"
+        f"roast this Discord user named '{user.display_name}'. "
+        f"make it funny, offenseive and edgy about {user.display_name}. "
+        "use emojis like 💀 🔥 and other popular emojis. Keep it one line:"
     )
-
+    
     retry_attempts = 3
     delay = 2
-
+    
     for attempt in range(retry_attempts):
         try:
-            roast_text = await call_llama3_via_google_script(prompt)
+            # Try the text generation model first
+            roast_text = await call_huggingface_text_generation(prompt)
             
             if roast_text:
                 # Clean up the response
                 roast_text = roast_text.replace('\n', ' ').strip()
+                
+                # If the response is too generic, add some spice
+                if len(roast_text) < 20:
+                    roast_text = "this is l (it was under 20 chars noob) 💀💀💀"
+                
                 await interaction.followup.send(roast_text)
                 return
             else:
-                logger.warning(f"Empty response from Llama3 (attempt {attempt + 1})")
+                logger.warning(f"Empty response from Hugging Face (attempt {attempt + 1})")
                 if attempt < retry_attempts - 1:
                     await asyncio.sleep(delay)
                     delay *= 2
-
+                    
         except Exception as e:
             logger.error(f"Error in roast command (attempt {attempt + 1}): {e}")
             if attempt < retry_attempts - 1:
                 await asyncio.sleep(delay)
                 delay *= 2
-
-    # If all attempts failed
+    
     await interaction.followup.send(
-        f"dumah {interaction.user.mention} failed to roast {user.display_name} 💀💀💀 (service unavailable)",
+        f"llll {interaction.user.meantion} failed ez ez 💀💀💀💀",
     )
-
-HUGGINGFACE_API_KEY = os.environ.get("HUGGINGFACE_API_KEY")
 
 # Assuming you have a bot instance
 # bot = commands.Bot(command_prefix='!', intents=discord.Intents.default())
