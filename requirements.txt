@@ -7,3 +7,4 @@ pynacl
 discord.py
 yt-dlp
 flask
+typing
