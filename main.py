@@ -41,7 +41,7 @@ import yt_dlp
 from io import BytesIO
 
 load_dotenv()
-token = os.getenviron("DISCORD_TOKEN")
+token = os.environ.get("DISCORD_TOKEN")
 
 # Enhanced logging configuration
 logging.basicConfig(
@@ -58,7 +58,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 
-WEBHOOK_URL = os.getenviron["BAN_WEBHOOK_URL"]
+WEBHOOK_URL = os.environ.get("BAN_WEBHOOK_URL")
 ALLOWED_USER_IDS = {
     1134133832023560215, # bob
     886638615629811773, # ed
@@ -493,7 +493,7 @@ async def roast(interaction: Interaction, user: User):
     )
 
 
-HUGGINGFACE_API_KEY = os.getenviron["HUGGINGFACE_API_KEY"]
+HUGGINGFACE_API_KEY = os.environ.get("HUGGINGFACE_API_KEY")
 
 # Assuming you have a bot instance
 # bot = commands.Bot(command_prefix='!', intents=discord.Intents.default())
@@ -663,7 +663,7 @@ async def ban_command(interaction: discord.Interaction, username: str, duration:
         "duration": duration,
         "reason": reason,
         "mod": interaction.user.id,
-        "token": os.getenviron["BAN_TOKEN"]
+        "token": os.environ.get("BAN_TOKEN")
     }
 
     try:
