@@ -111,7 +111,6 @@ youtube_regex = re.compile(
     r'^(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+$'
 )
 
-
 class TrackInfo:
     def __init__(self, url, title, user_id, user_name, duration=None, filename=None):
         self.url = url
@@ -138,62 +137,136 @@ def get_queue(guild_id):
     return music_queues[guild_id]
 
 
+# Enhanced cleanup function
 async def cleanup_voice_client(guild_id):
-    """Clean up voice client and related data"""
-    voice_client = discord.utils.get(bot.voice_clients, guild=bot.get_guild(guild_id))
+    """Enhanced cleanup with better error handling"""
+    try:
+        voice_client = discord.utils.get(bot.voice_clients, guild=bot.get_guild(guild_id))
 
-    if voice_client and voice_client.is_connected():
+        if voice_client:
+            try:
+                if voice_client.is_playing():
+                    voice_client.stop()
+                    await asyncio.sleep(0.5)  # Wait for stop to process
+                
+                if voice_client.is_connected():
+                    await voice_client.disconnect(force=True)
+                    logger.info(f"Cleaned up voice client for guild {guild_id}")
+            except Exception as e:
+                logger.error(f"Error disconnecting voice client: {e}")
+
+        # Clean up data
+        current_player.pop(guild_id, None)
+        currently_playing.pop(guild_id, None)
+        connection_retries.pop(guild_id, None)
+        if guild_id in music_queues:
+            music_queues[guild_id].clear()
+
+    except Exception as e:
+        logger.error(f"Error in cleanup_voice_client: {e}")
+
+
+async def voice_health_check():
+    """Periodically check voice connection health"""
+    while True:
         try:
-            if voice_client.is_playing():
-                voice_client.stop()
-            await voice_client.disconnect(force=True)
-            logger.info(f"Cleaned up voice client for guild {guild_id}")
+            await asyncio.sleep(30)  # Check every 30 seconds
+            
+            for voice_client in bot.voice_clients:
+                if voice_client.is_connected():
+                    # Check if connection is healthy
+                    if not voice_client.is_playing() and not get_queue(voice_client.guild.id):
+                        # No music and no queue, might want to disconnect after a while
+                        pass
+                else:
+                    # Connection is broken, clean up
+                    logger.warning(f"Found broken voice connection for guild {voice_client.guild.id}")
+                    await cleanup_voice_client(voice_client.guild.id)
+                    
         except Exception as e:
-            logger.error(f"Error cleaning up voice client for guild {guild_id}: {e}")
+            logger.error(f"Error in voice health check: {e}")
+            await asyncio.sleep(60)  # Wait longer on error
 
-    # Clean up data
-    current_player.pop(guild_id, None)
-    currently_playing.pop(guild_id, None)
-    connection_retries.pop(guild_id, None)
-    if guild_id in music_queues:
-        music_queues[guild_id].clear()
+# Add error handler for voice state updates
+@bot.event
+async def on_voice_state_update(member, before, after):
+    """Handle voice state changes and cleanup"""
+    if member.bot:
+        return
 
+    # Check if someone left a voice channel where the bot is connected
+    if before.channel and not after.channel:
+        voice_client = discord.utils.get(bot.voice_clients, guild=before.channel.guild)
+        if voice_client and voice_client.channel == before.channel:
+            # Check if we should disconnect
+            if await should_disconnect(before.channel.guild.id, member.id):
+                logger.info(f"User {member.display_name} left, checking if should disconnect")
+                await asyncio.sleep(5)  # Wait a bit in case they rejoin
+                if await should_disconnect(before.channel.guild.id, member.id):
+                    await cleanup_voice_client(before.channel.guild.id)
+                    logger.info("Disconnected due to user leaving")
 
-async def connect_to_voice_channel(channel, max_retries=MAX_RETRIES):
-    """Enhanced voice connection with exponential backoff"""
+# Enhanced connection function with better error handling
+async def connect_to_voice_channel(channel, max_retries=3):
+    """Enhanced voice connection with better error handling and backoff"""
     guild_id = channel.guild.id
 
     for attempt in range(max_retries):
         try:
             logger.info(f"Attempting to connect to {channel} (attempt {attempt + 1}/{max_retries})")
 
-            # Exponential backoff delay
+            # Progressive delay between retries
             if attempt > 0:
-                delay = RETRY_DELAY * (2 ** (attempt - 1))
+                delay = min(2 ** attempt, 16)  # Cap at 16 seconds
                 logger.info(f"Waiting {delay} seconds before retry...")
                 await asyncio.sleep(delay)
 
-            # Try to connect with timeout
+            # Clean up any existing connection first
+            existing_client = discord.utils.get(bot.voice_clients, guild=channel.guild)
+            if existing_client:
+                try:
+                    await existing_client.disconnect(force=True)
+                    await asyncio.sleep(2)  # Wait for cleanup
+                except:
+                    pass
+
+            # Try to connect with shorter timeout
             voice_client = await asyncio.wait_for(
-                channel.connect(reconnect=False, timeout=30.0),
-                timeout=35.0
+                channel.connect(reconnect=True, timeout=20.0),
+                timeout=25.0
             )
 
             logger.info(f"Successfully connected to {channel}")
-            connection_retries[guild_id] = 0  # Reset retry counter
+            connection_retries[guild_id] = 0
 
-            # Brief delay to ensure connection is stable
-            await asyncio.sleep(CONNECT_DELAY)
-            return voice_client
+            # Brief stability check
+            await asyncio.sleep(1)
+            
+            if voice_client.is_connected():
+                return voice_client
+            else:
+                logger.warning("Voice client connected but not stable")
+                await voice_client.disconnect(force=True)
+                continue
 
         except asyncio.TimeoutError:
             logger.warning(f"Connection timeout for {channel} (attempt {attempt + 1})")
         except discord.errors.ConnectionClosed as e:
             logger.warning(f"Connection closed for {channel}: {e} (attempt {attempt + 1})")
+            # For 4006 errors, wait longer before retry
+            if hasattr(e, 'code') and e.code == 4006:
+                logger.info("Got 4006 error, waiting extra time...")
+                await asyncio.sleep(10)
+        except discord.ClientException as e:
+            logger.error(f"Discord client error: {e} (attempt {attempt + 1})")
+            # Bot might already be connected
+            if "already connected" in str(e).lower():
+                existing = discord.utils.get(bot.voice_clients, guild=channel.guild)
+                if existing and existing.is_connected():
+                    return existing
         except Exception as e:
             logger.error(f"Unexpected error connecting to {channel}: {e} (attempt {attempt + 1})")
 
-        # Store retry count
         connection_retries[guild_id] = attempt + 1
 
     logger.error(f"Failed to connect to {channel} after {max_retries} attempts")
@@ -586,7 +659,7 @@ async def ban_command(interaction: discord.Interaction, username: str, duration:
     except Exception as e:
         await interaction.followup.send(f"request err: 💀💀💀 {type(e).__name__}", ephemeral=True)
 
-# Fixed /play command - handles YouTube sign-in detection and adds proper error handling
+# Enhanced play command with better error handling
 @bot.tree.command(name="play", description="plays music from youtube or adds to queue")
 @app_commands.describe(url="youtube url or search query")
 async def play_command(interaction: discord.Interaction, url: str):
@@ -600,54 +673,70 @@ async def play_command(interaction: discord.Interaction, url: str):
     channel = interaction.user.voice.channel
     guild = interaction.guild
 
-    # Get or create voice client
+    # Check for existing voice client
     voice_client = discord.utils.get(bot.voice_clients, guild=guild)
 
-    if not voice_client:
+    # If not connected or connection is broken, try to connect
+    if not voice_client or not voice_client.is_connected():
+        # Clean up any broken connections first
+        if voice_client:
+            try:
+                await voice_client.disconnect(force=True)
+            except:
+                pass
+        
         voice_client = await connect_to_voice_channel(channel)
         if not voice_client:
-            await interaction.followup.send("failed to connect to vc 💀", ephemeral=True)
+            await interaction.followup.send(
+                "l bob is dumb or gay and made bot break 💀💀💀💀", 
+                ephemeral=True
+            )
             return
         current_player[guild.id] = interaction.user.id
 
-    # Enhanced yt-dlp options to handle sign-in detection
+    # Enhanced yt-dlp options
     ydl_opts = {
         "format": "bestaudio[ext=webm]/bestaudio/best",
         "quiet": True,
         "noplaylist": True,
         "socket_timeout": 30,
-        "retries": 5,
-        "fragment_retries": 5,
+        "retries": 3,
+        "fragment_retries": 3,
         "extractaudio": False,
         "audioformat": "best",
         "outtmpl": "%(extractor)s-%(id)s-%(title)s.%(ext)s",
-        # Add cookies and headers to bypass sign-in detection
+        # Better headers and options
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        },
         "cookiefile": None,
         "extractor_args": {
             "youtube": {
-                "skip": ["dash", "hls"]
+                "skip": ["dash", "hls"],
+                "player_skip": ["configs", "webpage"]
             }
-        },
-        # Add user agent to appear more like a regular browser
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
     }
 
     try:
-        # If not a URL, search YouTube
+        # Search if not a URL
         if not youtube_regex.match(url):
             url = f"ytsearch:{url}"
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # First try to extract info without downloading
             try:
                 info = ydl.extract_info(url, download=False)
             except yt_dlp.utils.ExtractorError as e:
                 error_msg = str(e).lower()
-                if "sign in" in error_msg or "confirm" in error_msg or "bot" in error_msg:
+                if any(keyword in error_msg for keyword in ["sign in", "confirm", "bot", "blocked"]):
                     await interaction.followup.send(
-                        f"youtube is being gay and asking for sign in 💀 try a different video or wait a bit",
+                        "w the l ass song didnt play 🎖️🎖️🎖️🎖️",
+                        ephemeral=True
+                    )
+                    return
+                elif "private" in error_msg or "unavailable" in error_msg:
+                    await interaction.followup.send(
+                        "llll imagine putting a private video 💀",
                         ephemeral=True
                     )
                     return
@@ -657,12 +746,12 @@ async def play_command(interaction: discord.Interaction, url: str):
             # Handle search results
             if 'entries' in info:
                 if not info['entries']:
-                    await interaction.followup.send("no results found 💀", ephemeral=True)
+                    await interaction.followup.send("wha", ephemeral=True)
                     return
                 info = info['entries'][0]
 
             if not info:
-                await interaction.followup.send("failed to get video info 💀", ephemeral=True)
+                await interaction.followup.send("skill issue", ephemeral=True)
                 return
 
             title = info.get('title', 'Unknown')
@@ -682,31 +771,14 @@ async def play_command(interaction: discord.Interaction, url: str):
             queue = get_queue(guild.id)
             queue.append(track)
 
-            # If nothing is playing, start playing
+            # Start playing if nothing is playing
             if not voice_client.is_playing():
                 await play_next_track(guild, voice_client)
-                await interaction.followup.send(f"now playing: **{title}**")
+                await interaction.followup.send(f"ight ima play: **{title}**")
             else:
                 position = len(queue)
-                await interaction.followup.send(f"added to queue (#{position}): **{title}**")
+                await interaction.followup.send(f"added l song into the trash can 💀💀🗑️🗑: (#{position}): **{title}**")
 
-    except yt_dlp.utils.ExtractorError as e:
-        error_msg = str(e).lower()
-        if "sign in" in error_msg or "confirm" in error_msg or "bot" in error_msg:
-            await interaction.followup.send(
-                f"youtube is being cringe and asking for sign in 💀 try a different video",
-                ephemeral=True
-            )
-        elif "private" in error_msg or "unavailable" in error_msg:
-            await interaction.followup.send(
-                f"video is private or unavailable 💀",
-                ephemeral=True
-            )
-        else:
-            await interaction.followup.send(
-                f"failed to process video 💀: {str(e)[:100]}",
-                ephemeral=True
-            )
     except Exception as e:
         logger.error(f"Error in play command: {e}")
         await interaction.followup.send(f"something went wrong 💀", ephemeral=True)
@@ -948,128 +1020,10 @@ async def stop_command(interaction: discord.Interaction):
     
     if queue_count > 0:
         await interaction.response.send_message(
-            f"⏹️ stopped: **{current_song}** and cleared {queue_count} songs from queue"
+            f"ok ima stop"
         )
     else:
-        await interaction.response.send_message(f"⏹️ stopped: **{current_song}**")
-
-
-# Enhanced play_next_track function with better error handling
-async def play_next_track(guild, voice_client):
-    queue = get_queue(guild.id)
-
-    # Enhanced voice client validation
-    if not voice_client or not voice_client.is_connected():
-        logger.warning("Voice client is None or not connected")
-        await cleanup_voice_client(guild.id)
-        return
-
-    # Check if we should disconnect
-    if await should_disconnect(guild.id):
-        logger.info("Should disconnect - queue empty or host left")
-        await asyncio.sleep(DISCONNECT_DELAY)
-        if await should_disconnect(guild.id):
-            await cleanup_voice_client(guild.id)
-            logger.info("Disconnected - queue empty or host left")
-        return
-
-    if not queue:
-        logger.info("Queue is empty, nothing to play")
-        currently_playing.pop(guild.id, None)  # Clear currently playing
-        return
-
-    track = queue.popleft()
-    currently_playing[guild.id] = track
-
-    # Enhanced yt-dlp options for streaming
-    ydl_opts = {
-        "format": "bestaudio[ext=webm]/bestaudio/best",
-        "quiet": True,
-        "noplaylist": True,
-        "socket_timeout": 30,
-        "retries": 5,
-        "fragment_retries": 5,
-        "extractaudio": False,
-        "audioformat": "best",
-        "outtmpl": "%(extractor)s-%(id)s-%(title)s.%(ext)s",
-        # Enhanced options to handle sign-in detection
-        "cookiefile": None,
-        "extractor_args": {
-            "youtube": {
-                "skip": ["dash", "hls"]
-            }
-        },
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
-    }
-
-    try:
-        logger.info(f"Getting stream URL for track: {track.title}")
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(track.url, download=False)
-            
-            # Get the direct stream URL
-            stream_url = None
-            if 'url' in info:
-                stream_url = info['url']
-            elif 'formats' in info and info['formats']:
-                # Find best audio format
-                audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none']
-                if audio_formats:
-                    stream_url = audio_formats[0]['url']
-                else:
-                    stream_url = info['formats'][0]['url']
-            
-            if not stream_url:
-                raise Exception("Could not extract stream URL")
-
-            logger.info(f"Got stream URL for: {track.title}")
-
-    except yt_dlp.utils.ExtractorError as e:
-        error_msg = str(e).lower()
-        if "sign in" in error_msg or "confirm" in error_msg or "bot" in error_msg:
-            logger.error(f"YouTube sign-in required for track: {track.title}")
-        else:
-            logger.error(f"Extractor error for track {track.title}: {e}")
-        # Try to play next track
-        await play_next_track(guild, voice_client)
-        return
-    except Exception as e:
-        logger.error(f"Failed to get stream URL for track {track.title}: {e}")
-        # Try to play next track
-        await play_next_track(guild, voice_client)
-        return
-
-    def after_playing(error):
-        if error:
-            logger.error(f"Player error: {error}")
-
-        # Schedule next track
-        fut = asyncio.run_coroutine_threadsafe(play_next_track(guild, voice_client), bot.loop)
-        try:
-            fut.result()
-        except Exception as e:
-            logger.error(f"Error in next track task: {e}")
-
-    try:
-        # Enhanced FFmpeg options for better streaming
-        ffmpeg_options = {
-            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -http_persistent false',
-            'options': '-vn -bufsize 1024k'
-        }
-
-        logger.info(f"Starting playback: {track.title}")
-        voice_client.play(
-            discord.FFmpegPCMAudio(source=stream_url, **ffmpeg_options),
-            after=after_playing
-        )
-        logger.info("Playback started successfully")
-
-    except Exception as e:
-        logger.error(f"Error starting playback for {track.title}: {e}")
-        # Try next track
-        await play_next_track(guild, voice_client)
+        await interaction.response.send_message(f"ok i stooped the trash ah song: **{current_song}**")
 
 
 class QueueView(discord.ui.View):
