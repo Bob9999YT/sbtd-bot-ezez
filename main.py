@@ -508,44 +508,6 @@ async def play_command(interaction: discord.Interaction, url: str):
         except:
             pass
 
-@bot.tree.command(name="queue", description="Show the current music queue")
-async def queue_command(interaction: discord.Interaction):
-    try:
-        await interaction.response.defer()
-        
-        queue = get_queue(interaction.guild.id)
-        current_track = currently_playing.get(interaction.guild.id)
-        
-        if not current_track and not queue:
-            await interaction.followup.send("Queue is empty! 💀", ephemeral=True)
-            return
-        
-        embed = discord.Embed(title="Music Queue", color=0x00ff00)
-        
-        if current_track:
-            embed.add_field(
-                name="Now Playing",
-                value=f"**{current_track.title}** - {current_track.user_name}",
-                inline=False
-            )
-        
-        if queue:
-            queue_text = ""
-            for i, track in enumerate(list(queue)[:10]):  # Show first 10
-                duration_str = format_duration(track.duration)
-                queue_text += f"{i+1}. **{track.title}** [{duration_str}] - {track.user_name}\n"
-            
-            if len(queue) > 10:
-                queue_text += f"... and {len(queue) - 10} more"
-            
-            embed.add_field(name="Up Next", value=queue_text, inline=False)
-        
-        await interaction.followup.send(embed=embed)
-        
-    except Exception as e:
-        logger.error(f"Error in queue command: {e}")
-        await interaction.followup.send("Error showing queue! 💀", ephemeral=True)
-
 @bot.tree.command(name="skip", description="Skip to the next track")
 async def skip_command(interaction: discord.Interaction):
     try:
