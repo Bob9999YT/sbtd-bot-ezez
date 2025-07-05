@@ -565,7 +565,7 @@ async def play_command(interaction: discord.Interaction, url: str):
             pass
 
 # FIXED: Ban command with better error handling and response parsing
-@bot.tree.command(name="ban", description="Ban a user from SBTD")
+@bot.tree.command(name="sbtd-ban", description="Ban a user from SBTD")
 @app_commands.describe(
     username="Username to ban",
     duration="Duration (e.g., 1h, 1d, 1w)",
@@ -878,7 +878,6 @@ async def remove_command(interaction: discord.Interaction):
 
 
 
-
 @bot.event
 async def on_ready():
     logger.info(f"Logged in as {bot.user}!")
@@ -887,93 +886,7 @@ async def on_ready():
         logger.info(f"Synced {len(synced)} command(s)")
     except Exception as e:
         logger.error(f"Failed to sync commands: {e}")
-
-# FIXED: Ban command with proper redirect handling
-@bot.tree.command(name="ban", description="Ban a user from SBTD")
-@app_commands.describe(
-    username="Username to ban",
-    duration="Duration (e.g., 1h, 1d, 1w)",
-    reason="Reason for ban"
-)
-async def ban_command(interaction: discord.Interaction, username: str, duration: str, reason: str):
-    logger.info("Ban command started")
-    
-    try:
-        await interaction.response.defer(ephemeral=True)
-        logger.info("Ban command deferred successfully")
-    except Exception as e:
-        logger.error(f"Failed to defer ban command: {e}")
-        return
-
-    # Check permissions
-    if interaction.user.id not in ALLOWED_USER_IDS:
-        logger.warning(f"Unauthorized ban attempt by user {interaction.user.id}")
-        await interaction.followup.send("bros not a mod 💀💀", ephemeral=True)
-        return
-
-    # Validate duration format
-    duration = duration.lower()
-    if not any(duration.endswith(suffix) for suffix in ["m", "h", "d", "w", "y"]):
-        logger.warning(f"Invalid duration format: {duration}")
-        await interaction.followup.send("Invalid duration format! Use: 1m, 1h, 1d, 1w, 1y", ephemeral=True)
-        return
-
-    # Prepare payload
-    payload = {
-        "username": username,
-        "duration": duration,
-        "reason": reason,
-        "mod": interaction.user.id,
-        "token": os.environ.get("BAN_TOKEN")
-    }
-
-    headers = {
-        "Content-Type": "application/json",
-        "User-Agent": "DiscordBot/1.0"
-    }
-
-    try:
-        logger.info("Sending ban request to webhook")
         
-        # FIXED: Follow redirects and handle Google Apps Script properly
-        async with httpx.AsyncClient(
-            follow_redirects=True,  # Follow redirects automatically
-            timeout=30.0,
-            limits=httpx.Limits(max_redirects=5)
-        ) as client:
-            response = await client.post(WEBHOOK_URL, json=payload, headers=headers)
-
-        logger.info(f"Ban request response - Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            try:
-                # Try to parse JSON response
-                response_data = response.json()
-                if response_data.get("success"):
-                    await interaction.followup.send(f"the dumbah {username} has been banned from sbtd 💀")
-                else:
-                    error_msg = response_data.get("error", "Unknown error")
-                    await interaction.followup.send(f"Ban failed: {error_msg}", ephemeral=True)
-            except json.JSONDecodeError:
-                # If not JSON, assume success based on status code
-                if "success" in response.text.lower() or "banned" in response.text.lower():
-                    await interaction.followup.send(f"the dumbah {username} has been banned from sbtd 💀")
-                else:
-                    await interaction.followup.send(f"Ban request sent but response unclear: {response.text[:100]}", ephemeral=True)
-        else:
-            logger.error(f"Ban request failed with status {response.status_code}: {response.text}")
-            await interaction.followup.send(f"Ban request failed: HTTP {response.status_code}", ephemeral=True)
-
-    except httpx.TimeoutException:
-        logger.error("Ban request timed out")
-        await interaction.followup.send("Ban request timed out 💀", ephemeral=True)
-    except httpx.HTTPError as e:
-        logger.error(f"Ban request HTTP error: {e}")
-        await interaction.followup.send(f"Ban request failed: {type(e).__name__}", ephemeral=True)
-    except Exception as e:
-        logger.error(f"Ban request unexpected error: {e}")
-        await interaction.followup.send(f"Ban request error: {type(e).__name__}", ephemeral=True)
-
 @bot.event
 async def on_disconnect():
     logger.warning("Bot disconnected from Discord")
