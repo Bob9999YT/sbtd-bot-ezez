@@ -593,15 +593,26 @@ async def ban_command(interaction: discord.Interaction, username: str, duration:
         print("Unexpected error:", type(e).__name__, "-", e)
         await interaction.followup.send(f"request err: 💀 {type(e).__name__}", ephemeral=True)
 
-# Enhanced play command optimized for Render deployment
 @bot.tree.command(name="play", description="plays music from youtube or adds to queue")
 @app_commands.describe(url="youtube url or search query")
 async def play_command(interaction: discord.Interaction, url: str):
-    await interaction.response.defer()
+    # Immediately respond to avoid timeout
+    try:
+        await interaction.response.defer()
+    except discord.NotFound:
+        # Interaction expired, send a new message instead
+        await interaction.followup.send("hold on lemme process that 💀", ephemeral=True)
+        return
+    except discord.HTTPException:
+        # Some other Discord API error
+        return
 
     # Check if user is in a voice channel
     if not interaction.user.voice:
-        await interaction.followup.send("bro join a vc first 💀", ephemeral=True)
+        try:
+            await interaction.followup.send("bro join a vc first 💀", ephemeral=True)
+        except:
+            pass
         return
 
     channel = interaction.user.voice.channel
@@ -621,10 +632,13 @@ async def play_command(interaction: discord.Interaction, url: str):
         
         voice_client = await connect_to_voice_channel(channel)
         if not voice_client:
-            await interaction.followup.send(
-                "l bob is dumb or gay and made bot break 💀💀💀💀", 
-                ephemeral=True
-            )
+            try:
+                await interaction.followup.send(
+                    "l bob is dumb or gay and made bot break 💀💀💀💀", 
+                    ephemeral=True
+                )
+            except:
+                pass
             return
         current_player[guild.id] = interaction.user.id
 
@@ -697,28 +711,40 @@ async def play_command(interaction: discord.Interaction, url: str):
                         await asyncio.sleep(2 ** attempt)  # Exponential backoff
                         continue
                     else:
+                        try:
+                            await interaction.followup.send(
+                                "youtube is being gay rn, try again later 💀",
+                                ephemeral=True
+                            )
+                        except:
+                            pass
+                        return
+                el                if any(keyword in error_msg for keyword in ["sign in", "confirm", "bot", "blocked"]):
+                    try:
                         await interaction.followup.send(
-                            "youtube is being gay rn, try again later 💀",
+                            "w the l ass song didnt play 🎖️🎖️🎖️🎖️",
                             ephemeral=True
                         )
-                        return
-                elif any(keyword in error_msg for keyword in ["sign in", "confirm", "bot", "blocked"]):
-                    await interaction.followup.send(
-                        "w the l ass song didnt play 🎖️🎖️🎖️🎖️",
-                        ephemeral=True
-                    )
+                    except:
+                        pass
                     return
                 elif "private" in error_msg or "unavailable" in error_msg:
-                    await interaction.followup.send(
-                        "llll imagine putting a private video 💀",
-                        ephemeral=True
-                    )
+                    try:
+                        await interaction.followup.send(
+                            "llll imagine putting a private video 💀",
+                            ephemeral=True
+                        )
+                    except:
+                        pass
                     return
                 elif "this content isn't available" in error_msg:
-                    await interaction.followup.send(
-                        "youtube said nah to that video 💀",
-                        ephemeral=True
-                    )
+                    try:
+                        await interaction.followup.send(
+                            "youtube said nah to that video 💀",
+                            ephemeral=True
+                        )
+                    except:
+                        pass
                     return
                 else:
                     if attempt < max_attempts - 1:
@@ -736,12 +762,18 @@ async def play_command(interaction: discord.Interaction, url: str):
         # Handle search results
         if 'entries' in info:
             if not info['entries']:
-                await interaction.followup.send("wha", ephemeral=True)
+                try:
+                    await interaction.followup.send("wha", ephemeral=True)
+                except:
+                    pass
                 return
             info = info['entries'][0]
 
         if not info:
-            await interaction.followup.send("skill issue", ephemeral=True)
+            try:
+                await interaction.followup.send("skill issue", ephemeral=True)
+            except:
+                pass
             return
 
         title = info.get('title', 'Unknown')
@@ -764,14 +796,34 @@ async def play_command(interaction: discord.Interaction, url: str):
         # Start playing if nothing is playing
         if not voice_client.is_playing():
             await play_next_track(guild, voice_client)
-            await interaction.followup.send(f"ight ima play: **{title}**")
+            try:
+                await interaction.followup.send(f"ight ima play: **{title}**")
+            except:
+                pass
         else:
             position = len(queue)
-            await interaction.followup.send(f"added l song into the trash can 💀💀🗑️🗑: (#{position}): **{title}**")
+            try:
+                await interaction.followup.send(f"added l song into the trash can 💀💀🗑️🗑: (#{position}): **{title}**")
+            except:
+                pass
 
+    except CommandInvokeError as e:
+        logger.error(f"Discord command error: {e.original}")
+        try:
+            await interaction.followup.send(f"discord is being gay rn 💀", ephemeral=True)
+        except:
+            pass
     except Exception as e:
         logger.error(f"Error in play command: {e}")
-        await interaction.followup.send(f"l bob was dumb and broke the bot somehow 💀", ephemeral=True)
+        # Try to send error message but don't crash if it fails
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"l bob was dumb and broke the bot somehow 💀", ephemeral=True)
+            else:
+                await interaction.followup.send(f"l bob was dumb and broke the bot somehow 💀", ephemeral=True)
+        except:
+            # If we can't send a message, just log it
+            logger.error(f"Failed to send error message to user")
 
 
 # Additional helper function for Render deployment
