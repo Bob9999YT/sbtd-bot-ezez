@@ -111,6 +111,7 @@ youtube_regex = re.compile(
     r'^(https?://)?(www\.)?(youtube\.com|youtu\.be)/.+$'
 )
 
+# Your existing classes
 class TrackInfo:
     def __init__(self, url, title, user_id, user_name, duration=None, filename=None):
         self.url = url
@@ -563,8 +564,100 @@ async def play_command(interaction: discord.Interaction, url: str):
         except:
             pass
 
+# FIXED: Ban command with better error handling and response parsing
+@bot.tree.command(name="ban", description="Ban a user from SBTD")
+@app_commands.describe(
+    username="Username to ban",
+    duration="Duration (e.g., 1h, 1d, 1w)",
+    reason="Reason for ban"
+)
+async def ban_command(interaction: discord.Interaction, username: str, duration: str, reason: str):
+    logger.info("Ban command started")
+    
+    try:
+        await interaction.response.defer(ephemeral=True)
+        logger.info("Ban command deferred successfully")
+    except Exception as e:
+        logger.error(f"Failed to defer ban command: {e}")
+        return
 
-# Additional commands (skip, stop, pause, resume, leave, remove) remain the same but with better error handling
+    # Check permissions
+    if interaction.user.id not in ALLOWED_USER_IDS:
+        logger.warning(f"Unauthorized ban attempt by user {interaction.user.id}")
+        await interaction.followup.send("bros not a mod 💀💀", ephemeral=True)
+        return
+
+    # Validate duration format
+    duration = duration.lower()
+    if not any(duration.endswith(suffix) for suffix in ["m", "h", "d", "w", "y"]):
+        logger.warning(f"Invalid duration format: {duration}")
+        await interaction.followup.send("Invalid duration format! Use: 1m, 1h, 1d, 1w, 1y", ephemeral=True)
+        return
+
+    # Prepare payload
+    payload = {
+        "username": username,
+        "duration": duration,
+        "reason": reason,
+        "mod": interaction.user.id,
+        "token": os.environ.get("BAN_TOKEN")
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "DiscordBot/1.0"
+    }
+
+    try:
+        logger.info("Sending ban request to webhook")
+        
+        # FIXED: Better response handling for Google Apps Script
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=30.0,
+            limits=httpx.Limits(max_redirects=5)
+        ) as client:
+            response = await client.post(WEBHOOK_URL, json=payload, headers=headers)
+
+        logger.info(f"Ban request response - Status: {response.status_code}")
+        logger.info(f"Ban request response - Content: {response.text[:200]}")
+        
+        if response.status_code == 200:
+            try:
+                # Try to parse JSON response first
+                response_data = response.json()
+                if response_data.get("success"):
+                    await interaction.followup.send(f"the dumbah {username} has been banned from sbtd 💀")
+                else:
+                    error_msg = response_data.get("error", "Unknown error")
+                    await interaction.followup.send(f"Ban failed: {error_msg}", ephemeral=True)
+                    
+            except (json.JSONDecodeError, AttributeError):
+                # If not JSON, check response text for success indicators
+                response_text = response.text.lower()
+                if any(keyword in response_text for keyword in ["success", "banned", "complete"]):
+                    await interaction.followup.send(f"the dumbah {username} has been banned from sbtd 💀")
+                elif "error" in response_text or "fail" in response_text:
+                    await interaction.followup.send(f"Ban failed: {response.text[:100]}", ephemeral=True)
+                else:
+                    # Default to success if response is unclear but status is 200
+                    await interaction.followup.send(f"the dumbah {username} has been banned from sbtd 💀")
+                    
+        else:
+            logger.error(f"Ban request failed with status {response.status_code}: {response.text}")
+            await interaction.followup.send(f"Ban request failed: HTTP {response.status_code}", ephemeral=True)
+
+    except httpx.TimeoutException:
+        logger.error("Ban request timed out")
+        await interaction.followup.send("Ban request timed out 💀", ephemeral=True)
+    except httpx.HTTPError as e:
+        logger.error(f"Ban request HTTP error: {e}")
+        await interaction.followup.send(f"Ban request failed: {type(e).__name__}", ephemeral=True)
+    except Exception as e:
+        logger.error(f"Ban request unexpected error: {e}")
+        await interaction.followup.send(f"Ban request error: {type(e).__name__}", ephemeral=True)
+
+# Additional commands (skip, stop, pause, resume, leave, remove) with better error handling
 @bot.tree.command(name="skip", description="Skip to the next track")
 async def skip_command(interaction: discord.Interaction):
     try:
