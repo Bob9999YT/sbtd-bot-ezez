@@ -339,9 +339,16 @@ def create_audio_source(url):
         logger.error(f"Failed to create audio source: {e}")
         return None
 
+# Improved play_next_track function with better error handling
 async def play_next_track(guild, voice_client):
     """Play next track with better error handling"""
     try:
+        # Check if voice client is still valid
+        if not voice_client or not voice_client.is_connected():
+            logger.error("Voice client disconnected during playback")
+            await cleanup_voice_client(guild.id)
+            return
+        
         queue = get_queue(guild.id)
         
         if not queue:
@@ -353,33 +360,49 @@ async def play_next_track(guild, voice_client):
         currently_playing[guild.id] = track
         logger.info(f"Playing: {track.title}")
         
-        # Get fresh URL
+        # Get fresh URL with better error handling
         ydl_opts = {
             "format": "bestaudio/best",
             "quiet": True,
             "no_warnings": True,
             "socket_timeout": 30,
-            "retries": 2,
+            "retries": 3,
+            "fragment_retries": 3,
+            "extractor_retries": 3,
         }
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            try:
-                info = ydl.extract_info(track.url, download=False)
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = await asyncio.wait_for(
+                    asyncio.get_event_loop().run_in_executor(
+                        None, lambda: ydl.extract_info(track.url, download=False)
+                    ),
+                    timeout=60.0
+                )
+                
                 if 'url' in info:
                     url = info['url']
                 elif 'formats' in info and info['formats']:
                     url = info['formats'][0]['url']
                 else:
                     raise Exception("No playable URL found")
-            except Exception as e:
-                logger.error(f"Error extracting URL: {e}")
-                await play_next_track(guild, voice_client)
-                return
+                    
+        except Exception as e:
+            logger.error(f"Error extracting URL: {e}")
+            # Try next track
+            await play_next_track(guild, voice_client)
+            return
         
-        # Create audio source
-        audio_source = create_audio_source(url)
-        if not audio_source:
-            logger.error("Failed to create audio source, skipping track")
+        # Create audio source with better options
+        ffmpeg_options = {
+            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 200M -analyzeduration 200M',
+            'options': '-vn -bufsize 512k -b:a 128k'
+        }
+        
+        try:
+            audio_source = discord.FFmpegPCMAudio(url, **ffmpeg_options)
+        except Exception as e:
+            logger.error(f"Failed to create audio source: {e}")
             await play_next_track(guild, voice_client)
             return
         
@@ -390,16 +413,32 @@ async def play_next_track(guild, voice_client):
                 currently_playing.pop(guild.id, None)
             
             # Schedule next track
-            asyncio.run_coroutine_threadsafe(
-                play_next_track(guild, voice_client),
-                bot.loop
-            )
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    play_next_track(guild, voice_client),
+                    bot.loop
+                )
+            except Exception as e:
+                logger.error(f"Error scheduling next track: {e}")
         
-        voice_client.play(audio_source, after=after_playing)
+        # Check if voice client is still connected before playing
+        if voice_client.is_connected():
+            voice_client.play(audio_source, after=after_playing)
+        else:
+            logger.error("Voice client disconnected before starting playback")
+            await cleanup_voice_client(guild.id)
         
     except Exception as e:
         logger.error(f"Error in play_next_track: {e}")
         currently_playing.pop(guild.id, None)
+        # Try to continue with next track if possible
+        try:
+            queue = get_queue(guild.id)
+            if queue and voice_client and voice_client.is_connected():
+                await asyncio.sleep(1)
+                await play_next_track(guild, voice_client)
+        except:
+            pass
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -415,7 +454,7 @@ async def on_voice_state_update(member, before, after):
                 if await should_disconnect(before.channel.guild.id, member.id):
                     await cleanup_voice_client(before.channel.guild.id)
 
-# Commands
+# Fixed play command (better error handling and connection management)
 @bot.tree.command(name="play", description="Play music from YouTube or add to queue")
 @app_commands.describe(url="YouTube URL or search query")
 async def play_command(interaction: discord.Interaction, url: str):
@@ -436,22 +475,47 @@ async def play_command(interaction: discord.Interaction, url: str):
             await interaction.followup.send("I don't have permission to join/speak in that channel! 💀", ephemeral=True)
             return
 
-        # Get or create voice client
-        voice_client = await voice_manager.get_voice_client(guild.id)
+        # Get or create voice client with better error handling
+        voice_client = discord.utils.get(bot.voice_clients, guild=guild)
         
-        if not voice_client:
-            voice_client = await voice_manager.create_voice_client(channel)
-            
-            if not voice_client:
+        if not voice_client or not voice_client.is_connected():
+            try:
+                # Clean up any existing broken connections
+                if voice_client:
+                    try:
+                        await voice_client.disconnect(force=True)
+                    except:
+                        pass
+                    await asyncio.sleep(1)
+                
+                # Connect with timeout
+                voice_client = await asyncio.wait_for(
+                    channel.connect(timeout=30.0, reconnect=True),
+                    timeout=45.0
+                )
+                
+                if not voice_client or not voice_client.is_connected():
+                    await interaction.followup.send("Failed to connect to voice channel! 💀", ephemeral=True)
+                    return
+                    
+            except asyncio.TimeoutError:
+                await interaction.followup.send("Connection timeout! Try again. 💀", ephemeral=True)
+                return
+            except Exception as e:
+                logger.error(f"Voice connection error: {e}")
                 await interaction.followup.send("Couldn't connect to voice channel! 💀", ephemeral=True)
                 return
 
-        # Extract track info
+        # Extract track info with better error handling
         ydl_opts = {
             "format": "bestaudio/best",
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
+            "socket_timeout": 30,
+            "retries": 3,
+            "fragment_retries": 3,
+            "extractor_retries": 3,
         }
 
         try:
@@ -460,22 +524,39 @@ async def play_command(interaction: discord.Interaction, url: str):
                 if not url.startswith(('http://', 'https://')):
                     url = f"ytsearch:{url}"
                 
-                info = ydl.extract_info(url, download=False)
+                # Extract info with timeout
+                info = await asyncio.wait_for(
+                    asyncio.get_event_loop().run_in_executor(
+                        None, lambda: ydl.extract_info(url, download=False)
+                    ),
+                    timeout=60.0
+                )
                 
                 if 'entries' in info:
+                    if not info['entries']:
+                        await interaction.followup.send("No results found! 💀", ephemeral=True)
+                        return
                     info = info['entries'][0]
                 
+                # Validate required fields
+                if not info.get('title'):
+                    await interaction.followup.send("Invalid video data! 💀", ephemeral=True)
+                    return
+                
                 track = TrackInfo(
-                    url=info['webpage_url'],
+                    url=info.get('webpage_url', url),
                     title=info.get('title', 'Unknown'),
                     user_id=interaction.user.id,
                     user_name=interaction.user.display_name,
                     duration=info.get('duration')
                 )
                 
+        except asyncio.TimeoutError:
+            await interaction.followup.send("Video processing timeout! Try a different video. 💀", ephemeral=True)
+            return
         except Exception as e:
             logger.error(f"Error extracting track info: {e}")
-            await interaction.followup.send("Error processing that URL! 💀", ephemeral=True)
+            await interaction.followup.send("Error processing that URL! Try a different one. 💀", ephemeral=True)
             return
 
         # Add to queue or play immediately
@@ -499,7 +580,12 @@ async def play_command(interaction: discord.Interaction, url: str):
             await interaction.followup.send(f"Now playing: **{track.title}**")
             
             # Start playing
-            await play_next_track(guild, voice_client)
+            try:
+                await play_next_track(guild, voice_client)
+            except Exception as e:
+                logger.error(f"Error starting playback: {e}")
+                await interaction.followup.send("Error starting playback! 💀", ephemeral=True)
+                return
 
     except Exception as e:
         logger.error(f"Error in play command: {e}")
