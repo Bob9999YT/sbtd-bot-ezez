@@ -916,7 +916,7 @@ async def stop_command(interaction: discord.Interaction):
     if not can_stop:
         try:
             await interaction.followup.send(
-                "cant stop the music 💀 (need manage messages permission, be the host, or only have ur own songs)",
+                "bro tried 💀💀💀",
                 ephemeral=True
             )
         except:
@@ -1278,79 +1278,6 @@ async def manual_cleanup(guild_id, voice_client):
     except Exception as e:
         logger.error(f"Manual cleanup error: {e}")
         raise
-
-
-# Fixed /stop command - enhanced permission checking and queue management
-@bot.tree.command(name="stop", description="stops the current audio and clears the queue")
-async def stop_command(interaction: discord.Interaction):
-    voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
-
-    if not voice_client or not voice_client.is_connected():
-        await interaction.response.send_message("bot is not in a voice channel 💀", ephemeral=True)
-        return
-
-    if not voice_client.is_playing():
-        await interaction.response.send_message("nothing is playing 💀", ephemeral=True)
-        return
-
-    queue = get_queue(interaction.guild.id)
-    current_track = currently_playing.get(interaction.guild.id)
-    host_id = current_player.get(interaction.guild.id)
-    perms = interaction.user.guild_permissions
-
-    # Permission check - allow if:
-    # 1. User has manage messages permission (moderator)
-    # 2. User is the host
-    # 3. Only user's own songs are playing/queued
-    can_stop = False
-    
-    if perms.manage_messages:
-        can_stop = True
-    elif host_id == interaction.user.id:
-        can_stop = True
-    else:
-        # Check if only user's songs are in queue/playing
-        only_user_songs = True
-        
-        # Check current track
-        if current_track and current_track.user_id != interaction.user.id:
-            only_user_songs = False
-        
-        # Check queue
-        if only_user_songs:
-            for track in queue:
-                if track.user_id != interaction.user.id:
-                    only_user_songs = False
-                    break
-        
-        if only_user_songs:
-            can_stop = True
-
-    if not can_stop:
-        await interaction.response.send_message(
-            "cant stop the music 💀 (need manage messages permission, be the host, or only have ur own songs)",
-            ephemeral=True
-        )
-        return
-
-    # Count items being cleared
-    queue_count = len(queue)
-    current_song = current_track.title if current_track else "unknown"
-    
-    # Clear the queue and stop playback
-    queue.clear()
-    currently_playing.pop(interaction.guild.id, None)
-    
-    # Stop the current track
-    voice_client.stop()
-    
-    if queue_count > 0:
-        await interaction.response.send_message(
-            f"ok ima stop"
-        )
-    else:
-        await interaction.response.send_message(f"ok i stooped the trash ah song: **{current_song}**")
-
 
 class QueueView(discord.ui.View):
     def __init__(self, user_id, queue):
