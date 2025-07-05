@@ -690,7 +690,7 @@ async def play_command(interaction: discord.Interaction, url: str):
     try:
         await interaction.response.defer()
     except discord.NotFound:
-        await interaction.followup.send("hold on lemme process that 💀", ephemeral=True)
+        await interaction.followup.send("loading 💀💀💀💀", ephemeral=True)
         return
     except discord.HTTPException:
         return
