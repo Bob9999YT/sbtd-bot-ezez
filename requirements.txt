@@ -8,3 +8,5 @@ discord.py
 yt-dlp
 flask
 typing
+subprocess
+asyncio
