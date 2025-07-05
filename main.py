@@ -174,161 +174,101 @@ def get_queue(guild_id):
         music_queues[guild_id] = deque()
     return music_queues[guild_id]
 
-# Enhanced cleanup function
+# FIXED: Enhanced cleanup function with better state management
 async def cleanup_voice_client(guild_id):
-    """Enhanced cleanup with better error handling"""
+    """Enhanced cleanup with better error handling and state management"""
     try:
+        logger.info(f"Starting cleanup for guild {guild_id}")
+        
+        # Get voice client
         voice_client = discord.utils.get(bot.voice_clients, guild=bot.get_guild(guild_id))
-
+        
         if voice_client:
             try:
-                if voice_client.is_playing():
+                # Stop playback first
+                if voice_client.is_playing() or voice_client.is_paused():
                     voice_client.stop()
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.5)  # Give time for stop to process
                 
+                # Disconnect with force
                 if voice_client.is_connected():
                     await voice_client.disconnect(force=True)
-                    logger.info(f"Cleaned up voice client for guild {guild_id}")
+                    logger.info(f"Disconnected voice client for guild {guild_id}")
+                    
             except Exception as e:
-                logger.error(f"Error disconnecting voice client: {e}")
-
-        # Clean up data
-        current_player.pop(guild_id, None)
-        currently_playing.pop(guild_id, None)
-        connection_retries.pop(guild_id, None)
-        if guild_id in music_queues:
-            music_queues[guild_id].clear()
-
-    except Exception as e:
-        logger.error(f"Error in cleanup_voice_client: {e}")
-
-async def manual_cleanup(guild_id, voice_client):
-    """Manual cleanup fallback"""
-    try:
-        if voice_client:
-            await voice_client.disconnect(force=True)
-        
-        current_player.pop(guild_id, None)
-        currently_playing.pop(guild_id, None)
-        connection_retries.pop(guild_id, None)
-        if guild_id in music_queues:
-            music_queues[guild_id].clear()
-            
-    except Exception as e:
-        logger.error(f"Manual cleanup error: {e}")
-
-async def should_disconnect(guild_id, user_who_left_id=None):
-    """Check if bot should disconnect based on queue state and user departures"""
-    queue = get_queue(guild_id)
-    current_track = currently_playing.get(guild_id)
-    host_id = current_player.get(guild_id)
-
-    # Always disconnect if queue is empty and nothing playing
-    if not current_track and not queue:
-        return True
-
-    # If the HOST left the VC AND only host songs remain, disconnect
-    if user_who_left_id and host_id and user_who_left_id == host_id:
-        host_songs_only = True
-
-        # Check current track
-        if current_track and current_track.user_id != host_id:
-            host_songs_only = False
-
-        # Check queue
-        if host_songs_only:
-            for track in queue:
-                if track.user_id != host_id:
-                    host_songs_only = False
-                    break
-
-        if host_songs_only:
-            return True
-
-    return False
-
-async def connect_to_voice_channel(channel, max_retries=3):
-    """Robust voice channel connection with retry logic"""
-    for attempt in range(max_retries):
-        try:
-            guild = channel.guild
-            voice_client = discord.utils.get(guild.voice_clients)
-            
-            if voice_client:
+                logger.error(f"Error disconnecting voice client for guild {guild_id}: {e}")
+                # Force cleanup even if disconnect fails
                 try:
-                    await voice_client.disconnect(force=True)
-                    await asyncio.sleep(1)
+                    await voice_client.cleanup()
                 except:
                     pass
+
+        # Clean up all state data
+        current_player.pop(guild_id, None)
+        currently_playing.pop(guild_id, None)
+        connection_retries.pop(guild_id, None)
+        voice_connections.pop(guild_id, None)
+        
+        if guild_id in music_queues:
+            music_queues[guild_id].clear()
             
+        logger.info(f"Completed cleanup for guild {guild_id}")
+
+    except Exception as e:
+        logger.error(f"Error in cleanup_voice_client for guild {guild_id}: {e}")
+
+# FIXED: Improved voice connection with proper retry logic and state tracking
+async def connect_to_voice_channel(channel, max_retries=2):
+    """Robust voice channel connection with retry logic and state tracking"""
+    guild_id = channel.guild.id
+    
+    # Clean up any existing connection first
+    existing_vc = discord.utils.get(bot.voice_clients, guild=channel.guild)
+    if existing_vc:
+        try:
+            await existing_vc.disconnect(force=True)
+            await asyncio.sleep(1)  # Wait for cleanup
+        except:
+            pass
+    
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"Attempting voice connection to {channel.name} (attempt {attempt + 1}/{max_retries})")
+            
+            # Connect with shorter timeout to fail faster
             voice_client = await asyncio.wait_for(
-                channel.connect(timeout=30.0, reconnect=True),
-                timeout=45.0
+                channel.connect(timeout=15.0, reconnect=False),  # Disabled reconnect to avoid loops
+                timeout=20.0
             )
             
+            # Verify connection is stable
             if voice_client and voice_client.is_connected():
+                voice_connections[guild_id] = voice_client
+                logger.info(f"Successfully connected to voice channel in guild {guild_id}")
                 return voice_client
             else:
+                logger.warning(f"Connection established but not stable for guild {guild_id}")
                 raise Exception("Connection established but not stable")
                 
         except asyncio.TimeoutError:
-            logger.error(f"Voice connection timeout (attempt {attempt + 1}/{max_retries})")
+            logger.error(f"Voice connection timeout for guild {guild_id} (attempt {attempt + 1}/{max_retries})")
             if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(2)  # Short wait before retry
                 continue
                 
         except Exception as e:
-            logger.error(f"Voice connection error: {e} (attempt {attempt + 1}/{max_retries})")
+            logger.error(f"Voice connection error for guild {guild_id}: {e} (attempt {attempt + 1}/{max_retries})")
             if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
+                await asyncio.sleep(2)  # Short wait before retry
                 continue
     
+    logger.error(f"Failed to connect to voice channel after {max_retries} attempts")
     return None
 
-# Enhanced voice client management
-class VoiceManager:
-    def __init__(self):
-        self.voice_clients = {}
-        self.reconnect_tasks = {}
-    
-    async def get_voice_client(self, guild_id):
-        """Get or create voice client for guild"""
-        if guild_id in self.voice_clients:
-            vc = self.voice_clients[guild_id]
-            if vc and vc.is_connected():
-                return vc
-            else:
-                del self.voice_clients[guild_id]
-        return None
-    
-    async def create_voice_client(self, channel):
-        """Create new voice client with proper error handling"""
-        guild_id = channel.guild.id
-        
-        if guild_id in self.reconnect_tasks:
-            self.reconnect_tasks[guild_id].cancel()
-            del self.reconnect_tasks[guild_id]
-        
-        voice_client = await connect_to_voice_channel(channel)
-        
-        if voice_client:
-            self.voice_clients[guild_id] = voice_client
-            
-            async def on_disconnect():
-                if guild_id in self.voice_clients:
-                    del self.voice_clients[guild_id]
-            
-            voice_client.on_disconnect = on_disconnect
-            
-        return voice_client
-
-# Initialize voice manager
-voice_manager = VoiceManager()
-
-# Improved FFmpeg options
+# FIXED: Better FFmpeg options to prevent 4008 errors
 FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 200M',
-    'options': '-vn -bufsize 512k'
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 32M -analyzeduration 0',
+    'options': '-vn -bufsize 256k -ac 2 -ar 48000 -f s16le'
 }
 
 def create_audio_source(url):
@@ -339,36 +279,45 @@ def create_audio_source(url):
         logger.error(f"Failed to create audio source: {e}")
         return None
 
-# Improved play_next_track function with better error handling
+# FIXED: Improved play_next_track function with better error handling and 4008 prevention
 async def play_next_track(guild, voice_client):
-    """Play next track with better error handling"""
+    """Play next track with better error handling and 4008 prevention"""
     try:
-        # Check if voice client is still valid
+        guild_id = guild.id
+        
+        # Verify voice client is still valid and connected
         if not voice_client or not voice_client.is_connected():
-            logger.error("Voice client disconnected during playback")
-            await cleanup_voice_client(guild.id)
+            logger.error(f"Voice client disconnected during playback for guild {guild_id}")
+            await cleanup_voice_client(guild_id)
             return
         
-        queue = get_queue(guild.id)
+        # Double-check we're still in the voice connections tracker
+        if guild_id not in voice_connections or voice_connections[guild_id] != voice_client:
+            logger.error(f"Voice client mismatch for guild {guild_id}")
+            await cleanup_voice_client(guild_id)
+            return
+        
+        queue = get_queue(guild_id)
         
         if not queue:
-            currently_playing.pop(guild.id, None)
-            logger.info(f"Queue empty for guild {guild.id}")
+            currently_playing.pop(guild_id, None)
+            logger.info(f"Queue empty for guild {guild_id}")
             return
         
         track = queue.popleft()
-        currently_playing[guild.id] = track
-        logger.info(f"Playing: {track.title}")
+        currently_playing[guild_id] = track
+        logger.info(f"Playing: {track.title} in guild {guild_id}")
         
-        # Get fresh URL with better error handling
+        # Get fresh URL with better error handling and faster extraction
         ydl_opts = {
-            "format": "bestaudio/best",
+            "format": "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
             "quiet": True,
             "no_warnings": True,
-            "socket_timeout": 30,
-            "retries": 3,
-            "fragment_retries": 3,
-            "extractor_retries": 3,
+            "socket_timeout": 15,
+            "retries": 2,
+            "fragment_retries": 2,
+            "extractor_retries": 2,
+            "prefer_ffmpeg": True,
         }
         
         try:
@@ -377,68 +326,84 @@ async def play_next_track(guild, voice_client):
                     asyncio.get_event_loop().run_in_executor(
                         None, lambda: ydl.extract_info(track.url, download=False)
                     ),
-                    timeout=60.0
+                    timeout=30.0  # Reduced timeout
                 )
                 
                 if 'url' in info:
                     url = info['url']
                 elif 'formats' in info and info['formats']:
-                    url = info['formats'][0]['url']
+                    # Find best audio format
+                    audio_formats = [f for f in info['formats'] if f.get('vcodec') == 'none']
+                    if audio_formats:
+                        url = audio_formats[0]['url']
+                    else:
+                        url = info['formats'][0]['url']
                 else:
                     raise Exception("No playable URL found")
                     
         except Exception as e:
-            logger.error(f"Error extracting URL: {e}")
-            # Try next track
+            logger.error(f"Error extracting URL for guild {guild_id}: {e}")
+            # Try next track instead of failing completely
+            await asyncio.sleep(1)
             await play_next_track(guild, voice_client)
             return
         
-        # Create audio source with better options
-        ffmpeg_options = {
-            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 200M -analyzeduration 200M',
-            'options': '-vn -bufsize 512k -b:a 128k'
-        }
-        
+        # Create audio source with optimized settings
         try:
-            audio_source = discord.FFmpegPCMAudio(url, **ffmpeg_options)
+            audio_source = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
         except Exception as e:
-            logger.error(f"Failed to create audio source: {e}")
+            logger.error(f"Failed to create audio source for guild {guild_id}: {e}")
+            await asyncio.sleep(1)
             await play_next_track(guild, voice_client)
             return
         
-        # Play with error handling
+        # Play with enhanced error handling
         def after_playing(error):
             if error:
-                logger.error(f"Player error: {error}")
-                currently_playing.pop(guild.id, None)
+                logger.error(f"Player error for guild {guild_id}: {error}")
+                # Don't clear currently_playing here, let the next track function handle it
             
-            # Schedule next track
+            # Schedule next track with better error handling
             try:
-                asyncio.run_coroutine_threadsafe(
+                future = asyncio.run_coroutine_threadsafe(
                     play_next_track(guild, voice_client),
                     bot.loop
                 )
+                # Don't wait for completion to avoid blocking
             except Exception as e:
-                logger.error(f"Error scheduling next track: {e}")
+                logger.error(f"Error scheduling next track for guild {guild_id}: {e}")
+                # Clean up on scheduling failure
+                asyncio.run_coroutine_threadsafe(
+                    cleanup_voice_client(guild_id),
+                    bot.loop
+                )
         
-        # Check if voice client is still connected before playing
-        if voice_client.is_connected():
-            voice_client.play(audio_source, after=after_playing)
+        # Final connection check before playing
+        if voice_client.is_connected() and guild_id in voice_connections:
+            try:
+                voice_client.play(audio_source, after=after_playing)
+                logger.info(f"Started playing audio for guild {guild_id}")
+            except Exception as e:
+                logger.error(f"Error starting playback for guild {guild_id}: {e}")
+                await cleanup_voice_client(guild_id)
         else:
-            logger.error("Voice client disconnected before starting playback")
-            await cleanup_voice_client(guild.id)
+            logger.error(f"Voice client disconnected before starting playback for guild {guild_id}")
+            await cleanup_voice_client(guild_id)
         
     except Exception as e:
-        logger.error(f"Error in play_next_track: {e}")
+        logger.error(f"Error in play_next_track for guild {guild.id}: {e}")
         currently_playing.pop(guild.id, None)
         # Try to continue with next track if possible
         try:
             queue = get_queue(guild.id)
             if queue and voice_client and voice_client.is_connected():
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)  # Wait before retry
                 await play_next_track(guild, voice_client)
-        except:
-            pass
+            else:
+                await cleanup_voice_client(guild.id)
+        except Exception as cleanup_error:
+            logger.error(f"Error during cleanup after play_next_track failure: {cleanup_error}")
+            await cleanup_voice_client(guild.id)
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -446,15 +411,21 @@ async def on_voice_state_update(member, before, after):
     if member.bot:
         return
 
+    # Handle user leaving voice channel
     if before.channel and not after.channel:
         voice_client = discord.utils.get(bot.voice_clients, guild=before.channel.guild)
         if voice_client and voice_client.channel == before.channel:
-            if await should_disconnect(before.channel.guild.id, member.id):
-                await asyncio.sleep(5)
-                if await should_disconnect(before.channel.guild.id, member.id):
+            # Check if we should disconnect
+            remaining_members = [m for m in voice_client.channel.members if not m.bot]
+            if len(remaining_members) == 0:
+                logger.info(f"All users left voice channel in guild {before.channel.guild.id}")
+                await asyncio.sleep(3)  # Grace period
+                # Double-check
+                remaining_members = [m for m in voice_client.channel.members if not m.bot]
+                if len(remaining_members) == 0:
                     await cleanup_voice_client(before.channel.guild.id)
 
-# Fixed play command (better error handling and connection management)
+# FIXED: Enhanced play command with better connection handling
 @bot.tree.command(name="play", description="Play music from YouTube or add to queue")
 @app_commands.describe(url="YouTube URL or search query")
 async def play_command(interaction: discord.Interaction, url: str):
@@ -468,6 +439,7 @@ async def play_command(interaction: discord.Interaction, url: str):
 
         channel = interaction.user.voice.channel
         guild = interaction.guild
+        guild_id = guild.id
 
         # Check permissions
         permissions = channel.permissions_for(guild.me)
@@ -475,47 +447,44 @@ async def play_command(interaction: discord.Interaction, url: str):
             await interaction.followup.send("I don't have permission to join/speak in that channel! 💀", ephemeral=True)
             return
 
-        # Get or create voice client with better error handling
+        # Get or create voice client with enhanced error handling
         voice_client = discord.utils.get(bot.voice_clients, guild=guild)
         
-        if not voice_client or not voice_client.is_connected():
-            try:
-                # Clean up any existing broken connections
-                if voice_client:
-                    try:
-                        await voice_client.disconnect(force=True)
-                    except:
-                        pass
+        # Check if we need to connect or reconnect
+        need_connect = (
+            not voice_client or 
+            not voice_client.is_connected() or 
+            voice_client.channel != channel or
+            guild_id not in voice_connections or
+            voice_connections[guild_id] != voice_client
+        )
+        
+        if need_connect:
+            # Clean up any existing connection
+            if voice_client:
+                try:
+                    await voice_client.disconnect(force=True)
                     await asyncio.sleep(1)
-                
-                # Connect with timeout
-                voice_client = await asyncio.wait_for(
-                    channel.connect(timeout=30.0, reconnect=True),
-                    timeout=45.0
-                )
-                
-                if not voice_client or not voice_client.is_connected():
-                    await interaction.followup.send("Failed to connect to voice channel! 💀", ephemeral=True)
-                    return
-                    
-            except asyncio.TimeoutError:
-                await interaction.followup.send("Connection timeout! Try again. 💀", ephemeral=True)
-                return
-            except Exception as e:
-                logger.error(f"Voice connection error: {e}")
-                await interaction.followup.send("Couldn't connect to voice channel! 💀", ephemeral=True)
+                except:
+                    pass
+            
+            # Connect to voice channel
+            voice_client = await connect_to_voice_channel(channel)
+            
+            if not voice_client:
+                await interaction.followup.send("Failed to connect to voice channel! Try again. 💀", ephemeral=True)
                 return
 
-        # Extract track info with better error handling
+        # Extract track info with optimized settings
         ydl_opts = {
-            "format": "bestaudio/best",
+            "format": "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
-            "socket_timeout": 30,
-            "retries": 3,
-            "fragment_retries": 3,
-            "extractor_retries": 3,
+            "socket_timeout": 15,
+            "retries": 2,
+            "fragment_retries": 2,
+            "extractor_retries": 2,
         }
 
         try:
@@ -529,7 +498,7 @@ async def play_command(interaction: discord.Interaction, url: str):
                     asyncio.get_event_loop().run_in_executor(
                         None, lambda: ydl.extract_info(url, download=False)
                     ),
-                    timeout=60.0
+                    timeout=30.0
                 )
                 
                 if 'entries' in info:
@@ -560,8 +529,8 @@ async def play_command(interaction: discord.Interaction, url: str):
             return
 
         # Add to queue or play immediately
-        queue = get_queue(guild.id)
-        current_track = currently_playing.get(guild.id)
+        queue = get_queue(guild_id)
+        current_track = currently_playing.get(guild_id)
         
         if current_track or voice_client.is_playing():
             queue.append(track)
@@ -573,10 +542,10 @@ async def play_command(interaction: discord.Interaction, url: str):
             )
         else:
             # Set as current player if first song
-            if guild.id not in current_player:
-                current_player[guild.id] = interaction.user.id
+            if guild_id not in current_player:
+                current_player[guild_id] = interaction.user.id
             
-            currently_playing[guild.id] = track
+            currently_playing[guild_id] = track
             await interaction.followup.send(f"Now playing: **{track.title}**")
             
             # Start playing
@@ -594,6 +563,8 @@ async def play_command(interaction: discord.Interaction, url: str):
         except:
             pass
 
+
+# Additional commands (skip, stop, pause, resume, leave, remove) remain the same but with better error handling
 @bot.tree.command(name="skip", description="Skip to the next track")
 async def skip_command(interaction: discord.Interaction):
     try:
@@ -637,6 +608,38 @@ async def skip_command(interaction: discord.Interaction):
     except Exception as e:
         logger.error(f"Error in skip command: {e}")
         await interaction.followup.send("Error skipping track! 💀", ephemeral=True)
+
+@bot.tree.command(name="leave", description="Make the bot leave the voice channel")
+async def leave_command(interaction: discord.Interaction):
+    try:
+        await interaction.response.defer()
+        
+        voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
+        
+        if not voice_client or not voice_client.is_connected():
+            await interaction.followup.send("Bot is not in a voice channel! 💀", ephemeral=True)
+            return
+        
+        # Permission check
+        perms = interaction.user.guild_permissions
+        host_id = current_player.get(interaction.guild.id)
+        
+        can_leave = (
+            perms.manage_messages or
+            host_id == interaction.user.id or
+            len(voice_client.channel.members) <= 1
+        )
+        
+        if not can_leave:
+            await interaction.followup.send("You can't make me leave! 💀", ephemeral=True)
+            return
+        
+        await cleanup_voice_client(interaction.guild.id)
+        await interaction.followup.send("Left the voice channel")
+        
+    except Exception as e:
+        logger.error(f"Error in leave command: {e}")
+        await interaction.followup.send("Error leaving channel! 💀", ephemeral=True)
 
 @bot.tree.command(name="stop", description="Stop playback and clear queue")
 async def stop_command(interaction: discord.Interaction):
@@ -729,38 +732,6 @@ async def resume_command(interaction: discord.Interaction):
         logger.error(f"Error in resume command: {e}")
         await interaction.followup.send("Error resuming! 💀", ephemeral=True)
 
-@bot.tree.command(name="leave", description="Make the bot leave the voice channel")
-async def leave_command(interaction: discord.Interaction):
-    try:
-        await interaction.response.defer()
-        
-        voice_client = discord.utils.get(bot.voice_clients, guild=interaction.guild)
-        
-        if not voice_client or not voice_client.is_connected():
-            await interaction.followup.send("Bot is not in a voice channel! 💀", ephemeral=True)
-            return
-        
-        # Permission check
-        perms = interaction.user.guild_permissions
-        host_id = current_player.get(interaction.guild.id)
-        
-        can_leave = (
-            perms.manage_messages or
-            host_id == interaction.user.id or
-            len(voice_client.channel.members) <= 1
-        )
-        
-        if not can_leave:
-            await interaction.followup.send("You can't make me leave! 💀", ephemeral=True)
-            return
-        
-        await cleanup_voice_client(interaction.guild.id)
-        await interaction.followup.send("Left the voice channel")
-        
-    except Exception as e:
-        logger.error(f"Error in leave command: {e}")
-        await interaction.followup.send("Error leaving channel! 💀", ephemeral=True)
-
 @bot.tree.command(name="remove", description="Remove your songs from the queue")
 async def remove_command(interaction: discord.Interaction):
     try:
@@ -813,6 +784,8 @@ async def remove_command(interaction: discord.Interaction):
         await interaction.response.send_message("Error removing track! 💀", ephemeral=True)
 
 
+
+
 @bot.event
 async def on_ready():
     logger.info(f"Logged in as {bot.user}!")
@@ -822,6 +795,91 @@ async def on_ready():
     except Exception as e:
         logger.error(f"Failed to sync commands: {e}")
 
+# FIXED: Ban command with proper redirect handling
+@bot.tree.command(name="ban", description="Ban a user from SBTD")
+@app_commands.describe(
+    username="Username to ban",
+    duration="Duration (e.g., 1h, 1d, 1w)",
+    reason="Reason for ban"
+)
+async def ban_command(interaction: discord.Interaction, username: str, duration: str, reason: str):
+    logger.info("Ban command started")
+    
+    try:
+        await interaction.response.defer(ephemeral=True)
+        logger.info("Ban command deferred successfully")
+    except Exception as e:
+        logger.error(f"Failed to defer ban command: {e}")
+        return
+
+    # Check permissions
+    if interaction.user.id not in ALLOWED_USER_IDS:
+        logger.warning(f"Unauthorized ban attempt by user {interaction.user.id}")
+        await interaction.followup.send("bros not a mod 💀💀", ephemeral=True)
+        return
+
+    # Validate duration format
+    duration = duration.lower()
+    if not any(duration.endswith(suffix) for suffix in ["m", "h", "d", "w", "y"]):
+        logger.warning(f"Invalid duration format: {duration}")
+        await interaction.followup.send("Invalid duration format! Use: 1m, 1h, 1d, 1w, 1y", ephemeral=True)
+        return
+
+    # Prepare payload
+    payload = {
+        "username": username,
+        "duration": duration,
+        "reason": reason,
+        "mod": interaction.user.id,
+        "token": os.environ.get("BAN_TOKEN")
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "DiscordBot/1.0"
+    }
+
+    try:
+        logger.info("Sending ban request to webhook")
+        
+        # FIXED: Follow redirects and handle Google Apps Script properly
+        async with httpx.AsyncClient(
+            follow_redirects=True,  # Follow redirects automatically
+            timeout=30.0,
+            limits=httpx.Limits(max_redirects=5)
+        ) as client:
+            response = await client.post(WEBHOOK_URL, json=payload, headers=headers)
+
+        logger.info(f"Ban request response - Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            try:
+                # Try to parse JSON response
+                response_data = response.json()
+                if response_data.get("success"):
+                    await interaction.followup.send(f"the dumbah {username} has been banned from sbtd 💀")
+                else:
+                    error_msg = response_data.get("error", "Unknown error")
+                    await interaction.followup.send(f"Ban failed: {error_msg}", ephemeral=True)
+            except json.JSONDecodeError:
+                # If not JSON, assume success based on status code
+                if "success" in response.text.lower() or "banned" in response.text.lower():
+                    await interaction.followup.send(f"the dumbah {username} has been banned from sbtd 💀")
+                else:
+                    await interaction.followup.send(f"Ban request sent but response unclear: {response.text[:100]}", ephemeral=True)
+        else:
+            logger.error(f"Ban request failed with status {response.status_code}: {response.text}")
+            await interaction.followup.send(f"Ban request failed: HTTP {response.status_code}", ephemeral=True)
+
+    except httpx.TimeoutException:
+        logger.error("Ban request timed out")
+        await interaction.followup.send("Ban request timed out 💀", ephemeral=True)
+    except httpx.HTTPError as e:
+        logger.error(f"Ban request HTTP error: {e}")
+        await interaction.followup.send(f"Ban request failed: {type(e).__name__}", ephemeral=True)
+    except Exception as e:
+        logger.error(f"Ban request unexpected error: {e}")
+        await interaction.followup.send(f"Ban request error: {type(e).__name__}", ephemeral=True)
 
 @bot.event
 async def on_disconnect():
@@ -1009,64 +1067,6 @@ async def generate_image(interaction: discord.Interaction, prompt: str):
         "💀💀💀💀💀💀💀.",
         ephemeral=True
     )
-
-async def ban_command(interaction: discord.Interaction, username: str, duration: str, reason: str):
-    print("COMMAND STARTED")
-    try:
-        print("Deferring interaction response...")
-        await interaction.response.defer(ephemeral=True)
-        print("Deferred successfully ✅")
-    except Exception as e:
-        print("❌ Defer failed:", type(e).__name__, "-", e)
-        return
-
-    if interaction.user.id not in ALLOWED_USER_IDS:
-        print(f"Unauthorized user: {interaction.user.id}")
-        await interaction.followup.send("bros not a mod 💀💀", ephemeral=True)
-        return
-
-    duration = duration.lower()
-    if not any(duration.endswith(suffix) for suffix in ["m", "h", "d", "w", "y"]):
-        print(f"Invalid duration format: {duration}")
-        duration = "0"
-
-    payload = {
-        "username": username,
-        "duration": duration,
-        "reason": reason,
-        "mod": interaction.user.id,
-        "token": os.environ.get("BAN_TOKEN")
-    }
-
-    print("Payload prepared:", payload)
-
-    headers = {
-        "Content-Type": "application/json",
-        "User-Agent": "DiscordBot/1.0"
-    }
-
-    try:
-        print("Sending POST request to Google Script...")
-        async with httpx.AsyncClient(follow_redirects=False, timeout=30.0) as client:
-            response = await client.post(WEBHOOK_URL, json=payload, headers=headers)
-
-        print("Response status code:", response.status_code)
-        print("Redirect location header:", response.headers.get("location"))
-        print("Response text:", response.text)
-
-        if response.status_code == 200:
-            await interaction.followup.send(f"the dumbah {username} has been banned from sbtd 💀")
-        elif response.status_code == 302:
-            await interaction.followup.send("skill issue: 302 🔁 redirected", ephemeral=True)
-        else:
-            await interaction.followup.send(f"skill issue: {response.status_code}", ephemeral=True)
-
-    except httpx.HTTPError as e:
-        print("HTTPError:", e)
-        await interaction.followup.send(f"request died 💀 {type(e).__name__}", ephemeral=True)
-    except Exception as e:
-        print("Unexpected error:", type(e).__name__, "-", e)
-        await interaction.followup.send(f"request err: 💀 {type(e).__name__}", ephemeral=True)
 
 # Manual cleanup function for when cleanup_voice_client doesn't exist
 async def manual_cleanup(guild_id, voice_client):
