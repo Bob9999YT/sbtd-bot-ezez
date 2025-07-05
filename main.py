@@ -719,7 +719,7 @@ async def play_command(interaction: discord.Interaction, url: str):
                         except:
                             pass
                         return
-                el                elif any(keyword in error_msg for keyword in ["sign in", "confirm", "bot", "blocked"]):
+                elif any(keyword in error_msg for keyword in ["sign in", "confirm", "bot", "blocked"]):
                     try:
                         await interaction.followup.send(
                             "w the l ass song didnt play 🎖️🎖️🎖️🎖️",
