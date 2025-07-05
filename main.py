@@ -582,7 +582,7 @@ async def generate_image(interaction: discord.Interaction, prompt: str):
                         delay += 10
                     else:
                         await interaction.followup.send(
-                            f"idk what to even say at this point {response.status_code}),
+                            f"idk what to even say at this point why tf ai makes things cringe {response.status_code}). Please try again later.",
                         )
                         return
 
