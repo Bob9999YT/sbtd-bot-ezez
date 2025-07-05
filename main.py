@@ -206,71 +206,28 @@ async def on_voice_state_update(member, before, after):
                     await cleanup_voice_client(before.channel.guild.id)
                     logger.info("Disconnected due to user leaving")
 
-# Enhanced connection function with better error handling
-async def connect_to_voice_channel(channel, max_retries=3):
-    """Enhanced voice connection with better error handling and backoff"""
-    guild_id = channel.guild.id
+async def connect_to_voice_channel(channel):
+    """Connect to voice channel with better error handling for Render"""
+    try:
+        # Try to connect with longer timeout
+        voice_client = await channel.connect(timeout=60.0, reconnect=True)
+        logger.info(f"Successfully connected to {channel.name}")
+        return voice_client
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout connecting to {channel.name}")
+        return None
+    except discord.ClientException as e:
+        logger.error(f"Discord client error: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error connecting to voice: {e}")
+        return None
 
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"Attempting to connect to {channel} (attempt {attempt + 1}/{max_retries})")
-
-            # Progressive delay between retries
-            if attempt > 0:
-                delay = min(2 ** attempt, 16)  # Cap at 16 seconds
-                logger.info(f"Waiting {delay} seconds before retry...")
-                await asyncio.sleep(delay)
-
-            # Clean up any existing connection first
-            existing_client = discord.utils.get(bot.voice_clients, guild=channel.guild)
-            if existing_client:
-                try:
-                    await existing_client.disconnect(force=True)
-                    await asyncio.sleep(2)  # Wait for cleanup
-                except:
-                    pass
-
-            # Try to connect with shorter timeout
-            voice_client = await asyncio.wait_for(
-                channel.connect(reconnect=True, timeout=20.0),
-                timeout=25.0
-            )
-
-            logger.info(f"Successfully connected to {channel}")
-            connection_retries[guild_id] = 0
-
-            # Brief stability check
-            await asyncio.sleep(1)
-            
-            if voice_client.is_connected():
-                return voice_client
-            else:
-                logger.warning("Voice client connected but not stable")
-                await voice_client.disconnect(force=True)
-                continue
-
-        except asyncio.TimeoutError:
-            logger.warning(f"Connection timeout for {channel} (attempt {attempt + 1})")
-        except discord.errors.ConnectionClosed as e:
-            logger.warning(f"Connection closed for {channel}: {e} (attempt {attempt + 1})")
-            # For 4006 errors, wait longer before retry
-            if hasattr(e, 'code') and e.code == 4006:
-                logger.info("Got 4006 error, waiting extra time...")
-                await asyncio.sleep(10)
-        except discord.ClientException as e:
-            logger.error(f"Discord client error: {e} (attempt {attempt + 1})")
-            # Bot might already be connected
-            if "already connected" in str(e).lower():
-                existing = discord.utils.get(bot.voice_clients, guild=channel.guild)
-                if existing and existing.is_connected():
-                    return existing
-        except Exception as e:
-            logger.error(f"Unexpected error connecting to {channel}: {e} (attempt {attempt + 1})")
-
-        connection_retries[guild_id] = attempt + 1
-
-    logger.error(f"Failed to connect to {channel} after {max_retries} attempts")
-    return None
+# Improved FFmpeg options for Render
+FFMPEG_OPTIONS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -probesize 200M',
+    'options': '-vn -bufsize 512k'
+}
 
 
 async def should_disconnect(guild_id, user_who_left_id=None):
@@ -313,109 +270,71 @@ async def should_disconnect(guild_id, user_who_left_id=None):
 
     return False
 
-
-async def play_next_track(guild, voice_client):
-    queue = get_queue(guild.id)
-
-    # Enhanced voice client validation
-    if not voice_client:
-        logger.warning("Voice client is None")
-        await cleanup_voice_client(guild.id)
-        return
-
-    if not voice_client.is_connected():
-        logger.warning("Voice client is not connected")
-        await cleanup_voice_client(guild.id)
-        return
-
-    # Check if we should disconnect
-    if await should_disconnect(guild.id):
-        logger.info("Should disconnect - queue empty or host left")
-        await asyncio.sleep(DISCONNECT_DELAY)
-
-        # Check again in case something was added during the delay
-        if await should_disconnect(guild.id):
-            await cleanup_voice_client(guild.id)
-            logger.info("Disconnected - queue empty or host left")
-        return
-
-    if not queue:
-        logger.info("Queue is empty, nothing to play")
-        return
-
-    track = queue.popleft()
-    currently_playing[guild.id] = track
-
-    # Fixed yt-dlp options - stream directly instead of downloading
-    ydl_opts = {
-        "format": "bestaudio[ext=webm]/bestaudio/best",
-        "quiet": True,
-        "noplaylist": True,
-        "socket_timeout": 30,
-        "retries": 3,
-        "fragment_retries": 3,
-        "extractaudio": False,  # Don't extract audio, stream directly
-        "audioformat": "best",
-        "outtmpl": "%(extractor)s-%(id)s-%(title)s.%(ext)s",
-    }
-
+# Better audio source creation
+def create_audio_source(url):
+    """Create audio source with better error handling"""
     try:
-        logger.info(f"Getting stream URL for track: {track.title}")
+        return discord.FFmpegPCMAudio(
+            url,
+            **FFMPEG_OPTIONS,
+            executable='ffmpeg'  # Explicitly specify ffmpeg path
+        )
+    except Exception as e:
+        logger.error(f"Failed to create audio source: {e}")
+        return None
+    
+async def play_next_track(guild, voice_client):
+    """Play next track with better error handling"""
+    queue = get_queue(guild.id)
+    
+    if not queue:
+        logger.info(f"Queue empty for guild {guild.id}")
+        return
+    
+    track = queue.pop(0)
+    logger.info(f"Playing: {track.title}")
+    
+    try:
+        # Get fresh URL with shorter timeout
+        ydl_opts = {
+            "format": "bestaudio[ext=webm]/bestaudio/best",
+            "quiet": True,
+            "socket_timeout": 30,
+            "retries": 2,
+            "http_headers": {
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+            }
+        }
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(track.url, download=False)
-            # Get the direct stream URL
-            if 'url' in info:
-                stream_url = info['url']
-            elif 'formats' in info and info['formats']:
-                # Find best audio format
-                audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none']
-                if audio_formats:
-                    stream_url = audio_formats[0]['url']
-                else:
-                    stream_url = info['formats'][0]['url']
+            url = info['url']
+        
+        # Create audio source
+        audio_source = create_audio_source(url)
+        if not audio_source:
+            logger.error("Failed to create audio source, skipping track")
+            await play_next_track(guild, voice_client)
+            return
+        
+        # Play with error handling
+        def after_playing(error):
+            if error:
+                logger.error(f"Player error: {error}")
             else:
-                raise Exception("Could not extract stream URL")
-
-            track.filename = stream_url  # Store the stream URL
-            logger.info(f"Got stream URL: {stream_url[:100]}...")
-
+                logger.info("Track finished playing")
+            
+            # Schedule next track
+            asyncio.run_coroutine_threadsafe(
+                play_next_track(guild, voice_client),
+                bot.loop
+            )
+        
+        voice_client.play(audio_source, after=after_playing)
+        
     except Exception as e:
-        logger.error(f"Failed to get stream URL: {e}")
+        logger.error(f"Error playing track: {e}")
         # Try to play next track
-        await play_next_track(guild, voice_client)
-        return
-
-    def after_playing(error):
-        if error:
-            logger.error(f"Player error: {error}")
-
-        # No file cleanup needed since we're streaming
-
-        # Schedule next track
-        fut = asyncio.run_coroutine_threadsafe(play_next_track(guild, voice_client), bot.loop)
-        try:
-            fut.result()
-        except Exception as e:
-            logger.error(f"Error in next track task: {e}")
-
-    try:
-        # Fixed FFmpeg options - removed invalid options
-        ffmpeg_options = {
-            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-            'options': '-vn'  # Removed invalid audio bitrate option for streaming
-        }
-
-        logger.info(f"Starting playback: {track.title}")
-        # Use the stream URL directly
-        voice_client.play(
-            discord.FFmpegPCMAudio(source=stream_url, **ffmpeg_options),
-            after=after_playing
-        )
-        logger.info("Playback started successfully")
-
-    except Exception as e:
-        logger.error(f"Error starting playback: {e}")
-        # Try next track
         await play_next_track(guild, voice_client)
 
 
