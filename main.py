@@ -401,16 +401,6 @@ async def play_next_track(guild, voice_client):
         logger.error(f"Error in play_next_track: {e}")
         currently_playing.pop(guild.id, None)
 
-# Bot events
-@bot.event
-async def on_ready():
-    logger.info(f'{bot.user} has connected to Discord!')
-    try:
-        synced = await bot.tree.sync()
-        logger.info(f"Synced {len(synced)} command(s)")
-    except Exception as e:
-        logger.error(f"Failed to sync commands: {e}")
-
 @bot.event
 async def on_voice_state_update(member, before, after):
     """Handle voice state changes and cleanup"""
