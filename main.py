@@ -674,7 +674,7 @@ async def ban_command(interaction: discord.Interaction, username: str, duration:
         print("Unexpected error:", type(e).__name__, "-", e)
         await interaction.followup.send(f"request err: 💀 {type(e).__name__}", ephemeral=True)
 
-# Enhanced play command with better error handling
+# Enhanced play command optimized for Render deployment
 @bot.tree.command(name="play", description="plays music from youtube or adds to queue")
 @app_commands.describe(url="youtube url or search query")
 async def play_command(interaction: discord.Interaction, url: str):
@@ -709,28 +709,52 @@ async def play_command(interaction: discord.Interaction, url: str):
             return
         current_player[guild.id] = interaction.user.id
 
-    # Enhanced yt-dlp options
+    # Render-optimized yt-dlp options
     ydl_opts = {
-        "format": "bestaudio[ext=webm]/bestaudio/best",
+        "format": "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
         "quiet": True,
         "noplaylist": True,
-        "socket_timeout": 30,
-        "retries": 3,
-        "fragment_retries": 3,
+        "socket_timeout": 45,  # Higher timeout for Render
+        "retries": 5,          # More retries for unstable connections
+        "fragment_retries": 5,
         "extractaudio": False,
         "audioformat": "best",
         "outtmpl": "%(extractor)s-%(id)s-%(title)s.%(ext)s",
-        # Better headers and options
+        # Render-specific optimizations
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-us,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1"
         },
         "cookiefile": None,
+        "no_warnings": True,
+        # YouTube-specific fixes for server environments
         "extractor_args": {
             "youtube": {
                 "skip": ["dash", "hls"],
-                "player_skip": ["configs", "webpage"]
+                "player_skip": ["configs", "webpage"],
+                "player_client": ["android", "web"],
+                "innertube_host": "www.youtube.com",
+                "innertube_key": None,
+                "visitor_data": None,
+                "po_token": None
             }
-        }
+        },
+        # Additional stability options for Render
+        "geo_bypass": True,
+        "ignoreerrors": False,
+        "concurrent_fragments": 1,  # Reduce concurrent connections
+        "http_chunk_size": 10485760,  # 10MB chunks
+        "keepvideo": False,
+        "prefer_free_formats": True,
+        # Try to avoid rate limiting
+        "sleep_interval": 1,
+        "max_sleep_interval": 5,
+        "sleep_interval_subtitles": 1
     }
 
     try:
@@ -738,12 +762,28 @@ async def play_command(interaction: discord.Interaction, url: str):
         if not youtube_regex.match(url):
             url = f"ytsearch:{url}"
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        # Add retry logic with exponential backoff
+        max_attempts = 3
+        for attempt in range(max_attempts):
             try:
-                info = ydl.extract_info(url, download=False)
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                break  # Success, exit retry loop
             except yt_dlp.utils.ExtractorError as e:
                 error_msg = str(e).lower()
-                if any(keyword in error_msg for keyword in ["sign in", "confirm", "bot", "blocked"]):
+                
+                # Handle specific YouTube errors
+                if "visitor data" in error_msg or "po token" in error_msg:
+                    if attempt < max_attempts - 1:
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        continue
+                    else:
+                        await interaction.followup.send(
+                            "youtube is being gay rn, try again later 💀",
+                            ephemeral=True
+                        )
+                        return
+                elif any(keyword in error_msg for keyword in ["sign in", "confirm", "bot", "blocked"]):
                     await interaction.followup.send(
                         "w the l ass song didnt play 🎖️🎖️🎖️🎖️",
                         ephemeral=True
@@ -755,48 +795,76 @@ async def play_command(interaction: discord.Interaction, url: str):
                         ephemeral=True
                     )
                     return
+                elif "this content isn't available" in error_msg:
+                    await interaction.followup.send(
+                        "youtube said nah to that video 💀",
+                        ephemeral=True
+                    )
+                    return
+                else:
+                    if attempt < max_attempts - 1:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    else:
+                        raise e
+            except Exception as e:
+                if attempt < max_attempts - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
                 else:
                     raise e
 
-            # Handle search results
-            if 'entries' in info:
-                if not info['entries']:
-                    await interaction.followup.send("wha", ephemeral=True)
-                    return
-                info = info['entries'][0]
-
-            if not info:
-                await interaction.followup.send("skill issue", ephemeral=True)
+        # Handle search results
+        if 'entries' in info:
+            if not info['entries']:
+                await interaction.followup.send("wha", ephemeral=True)
                 return
+            info = info['entries'][0]
 
-            title = info.get('title', 'Unknown')
-            duration = info.get('duration', 0)
-            webpage_url = info.get('webpage_url', url)
+        if not info:
+            await interaction.followup.send("skill issue", ephemeral=True)
+            return
 
-            # Create track info
-            track = TrackInfo(
-                url=webpage_url,
-                title=title,
-                user_id=interaction.user.id,
-                user_name=interaction.user.display_name,
-                duration=duration
-            )
+        title = info.get('title', 'Unknown')
+        duration = info.get('duration', 0)
+        webpage_url = info.get('webpage_url', url)
 
-            # Add to queue
-            queue = get_queue(guild.id)
-            queue.append(track)
+        # Create track info
+        track = TrackInfo(
+            url=webpage_url,
+            title=title,
+            user_id=interaction.user.id,
+            user_name=interaction.user.display_name,
+            duration=duration
+        )
 
-            # Start playing if nothing is playing
-            if not voice_client.is_playing():
-                await play_next_track(guild, voice_client)
-                await interaction.followup.send(f"ight ima play: **{title}**")
-            else:
-                position = len(queue)
-                await interaction.followup.send(f"added l song into the trash can 💀💀🗑️🗑: (#{position}): **{title}**")
+        # Add to queue
+        queue = get_queue(guild.id)
+        queue.append(track)
+
+        # Start playing if nothing is playing
+        if not voice_client.is_playing():
+            await play_next_track(guild, voice_client)
+            await interaction.followup.send(f"ight ima play: **{title}**")
+        else:
+            position = len(queue)
+            await interaction.followup.send(f"added l song into the trash can 💀💀🗑️🗑: (#{position}): **{title}**")
 
     except Exception as e:
         logger.error(f"Error in play command: {e}")
-        await interaction.followup.send(f"something went wrong 💀", ephemeral=True)
+        await interaction.followup.send(f"l bob was dumb and broke the bot somehow 💀", ephemeral=True)
+
+
+# Additional helper function for Render deployment
+async def ensure_ffmpeg_available():
+    """Ensure FFmpeg is available on Render"""
+    try:
+        # Check if ffmpeg is available
+        result = subprocess.run(['ffmpeg', '-version'], 
+                              capture_output=True, text=True, timeout=10)
+        return result.returncode == 0
+    except:
+        return False
 
 
 # Fixed /remove command - properly handles queue management
